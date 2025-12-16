@@ -1,0 +1,58 @@
+// Video information returned from ffprobe
+export interface VideoInfo {
+  path: string;
+  filename: string;
+  duration: number;
+  fps: number;
+  width: number;
+  height: number;
+  codec: string;
+  bitrate: number | null;
+  file_size: number;
+}
+
+// FFmpeg availability status
+export interface FFmpegStatus {
+  available: boolean;
+  ffmpeg_path: string | null;
+  ffprobe_path: string | null;
+  version: string | null;
+}
+
+// Conversion progress event
+export interface ProgressEvent {
+  progress: number;
+  frame: number;
+  fps: number;
+  time: string;
+  speed: string;
+}
+
+// Conversion result
+export interface ConversionResult {
+  success: boolean;
+  output_path: string;
+  input_duration: number;
+  output_duration: number;
+  duration_diff: number;
+  duration_valid: boolean;
+  message: string;
+}
+
+// FPS preset
+export interface FpsPreset {
+  label: string;
+  value: number;
+  description: string;
+}
+
+// App state
+export type ConversionStatus = 
+  | 'idle'
+  | 'loading'
+  | 'ready'
+  | 'converting'
+  | 'completed'
+  | 'error'
+  | 'cancelled';
+

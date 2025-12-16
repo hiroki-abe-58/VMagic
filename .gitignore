@@ -1,0 +1,72 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules
+
+# Build outputs
+dist
+dist-ssr
+*.local
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment and secrets
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.secret
+*.credentials
+
+# Video files (test files)
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.flv
+*.m4v
+*.wmv
+*.mpg
+*.mpeg
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# Cursor
+.cursor/
+
+# Local scripts (not for distribution)
+git-push.command
