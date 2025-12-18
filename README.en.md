@@ -9,6 +9,7 @@ A desktop application for video frame rate conversion using ffmpeg's minterpolat
 
 - **Apple Silicon acceleration**: Hardware encoding via VideoToolbox (M1/M2/M3)
 - **Batch processing support**: Convert multiple files at once
+- **Thumbnail preview**: Auto-generates video thumbnails and displays them in the file list
 - **Minterpolate-based frame interpolation**: Smooth conversion with high-quality frame interpolation
 - **Duration preservation guarantee**: Ensures duration difference within ±0.1 seconds before and after conversion
 - **Real-time progress display**: Shows progress, frame count, and processing speed during conversion
