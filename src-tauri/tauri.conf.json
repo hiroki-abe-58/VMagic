@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "VMagic - FPS Converter",
-        "width": 1000,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
+        "width": 1200,
+        "height": 850,
+        "minWidth": 900,
+        "minHeight": 650,
         "resizable": true,
         "fullscreen": false,
         "center": true,
