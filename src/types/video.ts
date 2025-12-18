@@ -56,3 +56,31 @@ export type ConversionStatus =
   | 'error'
   | 'cancelled';
 
+// Batch processing types
+export type BatchItemStatus = 
+  | 'pending'
+  | 'loading'
+  | 'ready'
+  | 'converting'
+  | 'completed'
+  | 'error'
+  | 'cancelled';
+
+export interface BatchItem {
+  id: string;
+  inputPath: string;
+  outputPath: string;
+  videoInfo: VideoInfo | null;
+  status: BatchItemStatus;
+  progress: ProgressEvent | null;
+  result: ConversionResult | null;
+  error: string | null;
+}
+
+export interface BatchProgress {
+  totalFiles: number;
+  completedFiles: number;
+  currentFileIndex: number;
+  currentFileName: string;
+  overallProgress: number;
+}

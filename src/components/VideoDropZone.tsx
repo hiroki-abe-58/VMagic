@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { open } from '@tauri-apps/plugin-dialog';
 
 interface VideoDropZoneProps {
-  onFileSelected: (path: string) => void;
+  onFilesSelected: (paths: string[]) => void;
   isDisabled?: boolean;
-  hasVideo: boolean;
+  fileCount: number;
 }
 
 interface FileDropPayload {
@@ -19,7 +20,7 @@ function isVideoFile(path: string): boolean {
   return VIDEO_EXTENSIONS.includes(ext);
 }
 
-export function VideoDropZone({ onFileSelected, isDisabled, hasVideo }: VideoDropZoneProps) {
+export function VideoDropZone({ onFilesSelected, isDisabled, fileCount }: VideoDropZoneProps) {
   const [isDragActive, setIsDragActive] = useState(false);
 
   // Listen for Tauri file drop events
@@ -36,9 +37,9 @@ export function VideoDropZone({ onFileSelected, isDisabled, hasVideo }: VideoDro
         setIsDragActive(false);
         const paths = event.payload.paths;
         if (paths && paths.length > 0) {
-          const videoPath = paths.find(p => isVideoFile(p));
-          if (videoPath) {
-            onFileSelected(videoPath);
+          const videoPaths = paths.filter(p => isVideoFile(p));
+          if (videoPaths.length > 0) {
+            onFilesSelected(videoPaths);
           }
         }
       });
@@ -61,32 +62,41 @@ export function VideoDropZone({ onFileSelected, isDisabled, hasVideo }: VideoDro
       unlistenHover?.();
       unlistenCancel?.();
     };
-  }, [isDisabled, onFileSelected]);
+  }, [isDisabled, onFilesSelected]);
 
   const handleClick = useCallback(async () => {
     if (isDisabled) return;
     
-    // Use Tauri dialog
-    const { selectVideoFile } = await import('../lib/tauri-commands');
-    const path = await selectVideoFile();
-    if (path) {
-      onFileSelected(path);
+    const result = await open({
+      multiple: true,
+      filters: [
+        {
+          name: '動画ファイル',
+          extensions: VIDEO_EXTENSIONS,
+        },
+      ],
+    });
+    
+    if (result && Array.isArray(result) && result.length > 0) {
+      onFilesSelected(result);
+    } else if (result && typeof result === 'string') {
+      onFilesSelected([result]);
     }
-  }, [isDisabled, onFileSelected]);
+  }, [isDisabled, onFilesSelected]);
 
   return (
     <div
       onClick={handleClick}
       className={`
-        relative w-full min-h-[200px] rounded-xl border-2 border-dashed
-        flex flex-col items-center justify-center gap-4 p-8
+        relative w-full min-h-[160px] rounded-xl border-2 border-dashed
+        flex flex-col items-center justify-center gap-3 p-6
         transition-all duration-300 cursor-pointer
         ${isDragActive 
           ? 'border-neon-yellow bg-neon-yellow/5' 
           : 'border-dark-border hover:border-neon-yellow/50 hover:bg-dark-surface-light/50'
         }
         ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}
-        ${hasVideo ? 'border-neon-yellow/30 bg-dark-surface' : 'bg-dark-surface/50'}
+        ${fileCount > 0 ? 'border-neon-yellow/30 bg-dark-surface' : 'bg-dark-surface/50'}
       `}
     >
       {/* Background pattern */}
@@ -103,19 +113,19 @@ export function VideoDropZone({ onFileSelected, isDisabled, hasVideo }: VideoDro
 
       {/* Icon */}
       <div className={`
-        w-20 h-20 rounded-full flex items-center justify-center
+        w-16 h-16 rounded-full flex items-center justify-center
         ${isDragActive ? 'bg-neon-yellow/20' : 'bg-dark-surface-light'}
         transition-colors duration-300
       `}>
         <svg 
-          className={`w-10 h-10 ${isDragActive ? 'text-neon-yellow' : 'text-text-secondary'}`}
+          className={`w-8 h-8 ${isDragActive ? 'text-neon-yellow' : 'text-text-secondary'}`}
           fill="none" 
           viewBox="0 0 24 24" 
           stroke="currentColor"
         >
-          {hasVideo ? (
+          {fileCount > 0 ? (
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} 
-              d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" 
+              d="M12 4v16m8-8H4" 
             />
           ) : (
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} 
@@ -127,18 +137,21 @@ export function VideoDropZone({ onFileSelected, isDisabled, hasVideo }: VideoDro
 
       {/* Text */}
       <div className="text-center z-10">
-        <p className={`text-lg font-medium ${isDragActive ? 'text-neon-yellow' : 'text-text-primary'}`}>
-          {hasVideo 
-            ? '別の動画を選択' 
+        <p className={`text-base font-medium ${isDragActive ? 'text-neon-yellow' : 'text-text-primary'}`}>
+          {fileCount > 0 
+            ? '動画を追加' 
             : isDragActive 
-              ? 'ドロップして動画を読み込み' 
+              ? 'ドロップして動画を追加' 
               : '動画をドラッグ&ドロップ'
           }
         </p>
         <p className="text-sm text-text-secondary mt-1">
-          またはクリックしてファイルを選択
+          {fileCount > 0 
+            ? `${fileCount}ファイル選択中 - クリックで追加`
+            : '複数ファイル選択可能'
+          }
         </p>
-        <p className="text-xs text-text-muted mt-2">
+        <p className="text-xs text-text-muted mt-1">
           対応形式: MP4, MOV, AVI, MKV, WebM
         </p>
       </div>

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { FPS_PRESETS, DEFAULT_FPS } from '../lib/presets';
+import { FPS_PRESETS } from '../lib/presets';
 
 interface FpsSettingsProps {
   currentFps: number | null;

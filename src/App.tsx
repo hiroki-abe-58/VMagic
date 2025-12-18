@@ -1,24 +1,28 @@
 import { useState, useEffect, useCallback } from 'react';
 import { VideoDropZone } from './components/VideoDropZone';
-import { VideoInfo } from './components/VideoInfo';
 import { FpsSettings } from './components/FpsSettings';
-import { OutputPreview } from './components/OutputPreview';
-import { OutputSelector } from './components/OutputSelector';
-import { ConvertButton } from './components/ConvertButton';
-import { ProgressBar } from './components/ProgressBar';
-import { useVideoInfo } from './hooks/useVideoInfo';
-import { useConvert } from './hooks/useConvert';
+import { BatchFileList } from './components/BatchFileList';
+import { BatchProgress } from './components/BatchProgress';
 import { checkFfmpeg } from './lib/tauri-commands';
+import { useBatchConvert } from './hooks/useBatchConvert';
 import { DEFAULT_FPS } from './lib/presets';
 import type { FFmpegStatus } from './types/video';
 
 function App() {
   const [ffmpegStatus, setFfmpegStatus] = useState<FFmpegStatus | null>(null);
   const [targetFps, setTargetFps] = useState(DEFAULT_FPS);
-  const [outputPath, setOutputPath] = useState('');
 
-  const { videoInfo, isLoading: isLoadingVideo, error: videoError, loadVideoInfo, clearVideoInfo } = useVideoInfo();
-  const { status, progress, result, error: convertError, startConversion, cancel, reset } = useConvert();
+  const {
+    items,
+    batchProgress,
+    isProcessing,
+    addFiles,
+    removeFile,
+    clearFiles,
+    startBatchConversion,
+    cancelBatchConversion,
+    reset,
+  } = useBatchConvert();
 
   // Check ffmpeg availability on mount
   useEffect(() => {
@@ -35,28 +39,33 @@ function App() {
   }, []);
 
   // Handle file selection
-  const handleFileSelected = useCallback(async (path: string) => {
-    reset();
-    setOutputPath('');
-    await loadVideoInfo(path);
-  }, [loadVideoInfo, reset]);
+  const handleFilesSelected = useCallback(async (paths: string[]) => {
+    await addFiles(paths);
+  }, [addFiles]);
 
   // Handle conversion start
   const handleStartConversion = useCallback(async () => {
-    if (!videoInfo || !outputPath) return;
-    await startConversion(videoInfo.path, outputPath, targetFps);
-  }, [videoInfo, outputPath, targetFps, startConversion]);
+    if (items.length === 0) return;
+    await startBatchConversion(targetFps);
+  }, [items, targetFps, startBatchConversion]);
 
-  // Handle new conversion
-  const handleNewConversion = useCallback(() => {
-    clearVideoInfo();
+  // Handle reset
+  const handleReset = useCallback(() => {
     reset();
-    setOutputPath('');
-  }, [clearVideoInfo, reset]);
+  }, [reset]);
 
-  const isConverting = status === 'converting';
-  const isCompleted = status === 'completed' || status === 'error' || status === 'cancelled';
-  const canStartConversion = videoInfo && outputPath && !isConverting && status !== 'completed';
+  // Handle clear
+  const handleClear = useCallback(() => {
+    clearFiles();
+  }, [clearFiles]);
+
+  const hasFiles = items.length > 0;
+  const readyFiles = items.filter(i => i.status === 'ready' || i.status === 'pending');
+  const hasCompletedAll = items.length > 0 && items.every(i => i.status === 'completed' || i.status === 'error' || i.status === 'cancelled');
+  const canStartConversion = readyFiles.length > 0 && !isProcessing;
+  const averageFps = items.length > 0 
+    ? items.reduce((sum, i) => sum + (i.videoInfo?.fps || 0), 0) / items.filter(i => i.videoInfo).length 
+    : 0;
 
   return (
     <div className="flex flex-col min-h-screen bg-dark-bg">
@@ -73,7 +82,7 @@ function App() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-text-primary">VMagic</h1>
-              <p className="text-xs text-text-secondary">FPS Converter</p>
+              <p className="text-xs text-text-secondary">Batch FPS Converter</p>
             </div>
           </div>
 
@@ -121,110 +130,152 @@ function App() {
             </div>
           )}
 
-          {/* Video Error */}
-          {videoError && (
-            <div className="mb-6 p-4 bg-error/10 border border-error/30 rounded-xl">
-              <p className="text-error">{videoError}</p>
-            </div>
-          )}
-
           <div className="space-y-6">
             {/* Video Drop Zone */}
             <VideoDropZone 
-              onFileSelected={handleFileSelected}
-              isDisabled={!ffmpegStatus?.available || isConverting}
-              hasVideo={!!videoInfo}
+              onFilesSelected={handleFilesSelected}
+              isDisabled={!ffmpegStatus?.available || isProcessing}
+              fileCount={items.length}
             />
 
-            {/* Loading State */}
-            {isLoadingVideo && (
-              <div className="flex items-center justify-center py-8">
-                <svg className="w-8 h-8 text-neon-yellow animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" 
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" 
-                  />
-                </svg>
-                <span className="ml-3 text-text-secondary">動画情報を読み込み中...</span>
+            {/* Batch File List */}
+            {hasFiles && (
+              <BatchFileList 
+                items={items}
+                onRemove={removeFile}
+                isDisabled={isProcessing}
+              />
+            )}
+
+            {/* FPS Settings */}
+            {hasFiles && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <FpsSettings 
+                  currentFps={averageFps}
+                  targetFps={targetFps}
+                  onTargetFpsChange={setTargetFps}
+                  isDisabled={isProcessing}
+                />
+                
+                {/* Batch Info */}
+                <div className="bg-dark-surface rounded-xl p-6 border border-dark-border">
+                  <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+                    <svg className="w-5 h-5 text-neon-yellow" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    変換設定
+                  </h2>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between py-2 border-b border-dark-border">
+                      <span className="text-text-secondary">対象ファイル数</span>
+                      <span className="text-text-primary font-medium">{readyFiles.length}ファイル</span>
+                    </div>
+                    <div className="flex items-center justify-between py-2 border-b border-dark-border">
+                      <span className="text-text-secondary">出力FPS</span>
+                      <span className="text-neon-yellow font-medium">{targetFps} fps</span>
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <span className="text-text-secondary">出力形式</span>
+                      <span className="text-text-primary font-medium">MP4 (H.264)</span>
+                    </div>
+                    <p className="text-xs text-text-muted mt-2">
+                      変換後のファイルは元のファイルと同じディレクトリに保存されます
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* Video Info & Settings */}
-            {videoInfo && !isLoadingVideo && (
-              <>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Left Column */}
-                  <div className="space-y-6">
-                    <VideoInfo info={videoInfo} />
-                    <OutputSelector 
-                      inputPath={videoInfo.path}
-                      inputFilename={videoInfo.filename}
-                      targetFps={targetFps}
-                      outputPath={outputPath}
-                      onOutputPathChange={setOutputPath}
-                      isDisabled={isConverting}
-                    />
-                  </div>
+            {/* Batch Progress */}
+            <BatchProgress 
+              progress={batchProgress}
+              isProcessing={isProcessing}
+            />
 
-                  {/* Right Column */}
-                  <div className="space-y-6">
-                    <FpsSettings 
-                      currentFps={videoInfo.fps}
-                      targetFps={targetFps}
-                      onTargetFpsChange={setTargetFps}
-                      isDisabled={isConverting}
-                    />
-                    <OutputPreview 
-                      inputInfo={videoInfo}
-                      targetFps={targetFps}
-                    />
-                  </div>
-                </div>
-
-                {/* Progress Bar */}
-                {(isConverting || isCompleted) && (
-                  <ProgressBar 
-                    status={status}
-                    progress={progress}
-                    result={result}
-                    error={convertError}
-                    onCancel={cancel}
-                  />
-                )}
-
-                {/* Action Buttons */}
-                <div className="flex gap-4">
-                  {isCompleted ? (
+            {/* Action Buttons */}
+            {hasFiles && (
+              <div className="flex gap-4">
+                {hasCompletedAll ? (
+                  <button
+                    onClick={handleReset}
+                    className="flex-1 py-4 px-6 rounded-xl font-semibold text-lg
+                               bg-dark-surface-light text-text-primary border border-dark-border
+                               hover:border-neon-yellow/50 transition-all duration-300
+                               flex items-center justify-center gap-3"
+                  >
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" 
+                      />
+                    </svg>
+                    新しい変換
+                  </button>
+                ) : isProcessing ? (
+                  <button
+                    onClick={cancelBatchConversion}
+                    className="flex-1 py-4 px-6 rounded-xl font-semibold text-lg
+                               bg-error/20 text-error border border-error/30
+                               hover:bg-error/30 transition-all duration-300
+                               flex items-center justify-center gap-3"
+                  >
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M6 18L18 6M6 6l12 12" 
+                      />
+                    </svg>
+                    キャンセル
+                  </button>
+                ) : (
+                  <>
                     <button
-                      onClick={handleNewConversion}
-                      className="flex-1 py-4 px-6 rounded-xl font-semibold text-lg
-                                 bg-dark-surface-light text-text-primary border border-dark-border
-                                 hover:border-neon-yellow/50 transition-all duration-300
+                      onClick={handleClear}
+                      className="py-4 px-6 rounded-xl font-semibold text-lg
+                                 bg-dark-surface-light text-text-secondary border border-dark-border
+                                 hover:border-red-500/50 hover:text-red-500 transition-all duration-300
                                  flex items-center justify-center gap-3"
                     >
                       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" 
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" 
                         />
                       </svg>
-                      新しい変換
+                      クリア
                     </button>
-                  ) : (
-                    <ConvertButton 
+                    <button
                       onClick={handleStartConversion}
-                      isDisabled={!canStartConversion}
-                      isConverting={isConverting}
-                    />
-                  )}
-                </div>
-              </>
+                      disabled={!canStartConversion}
+                      className={`flex-1 py-4 px-6 rounded-xl font-semibold text-lg
+                                 flex items-center justify-center gap-3 transition-all duration-300
+                                 ${canStartConversion 
+                                   ? 'bg-neon-yellow text-dark-bg hover:bg-neon-yellow/90 shadow-lg shadow-neon-yellow/20' 
+                                   : 'bg-dark-surface-light text-text-muted cursor-not-allowed'
+                                 }`}
+                    >
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                          d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" 
+                        />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                          d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" 
+                        />
+                      </svg>
+                      バッチ変換開始 ({readyFiles.length}ファイル)
+                    </button>
+                  </>
+                )}
+              </div>
             )}
 
             {/* Empty State */}
-            {!videoInfo && !isLoadingVideo && ffmpegStatus?.available && (
+            {!hasFiles && ffmpegStatus?.available && (
               <div className="text-center py-8">
                 <p className="text-text-muted">
                   動画ファイルをドロップまたは選択して、フレームレート変換を開始してください
+                </p>
+                <p className="text-text-muted text-sm mt-2">
+                  複数ファイルの一括変換に対応しています
                 </p>
               </div>
             )}
