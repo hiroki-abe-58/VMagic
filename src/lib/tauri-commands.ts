@@ -41,6 +41,29 @@ export async function cancelConversion(): Promise<void> {
     return invoke<void>('cancel_conversion');
 }
 
+// Upscale video using Real-ESRGAN AI
+export async function upscaleVideo(
+  inputPath: string,
+  outputPath: string,
+  scaleFactor: number = 4,
+  modelName: string = 'realesrgan-x4plus',
+  useHwAccel: boolean = true,
+  useHevc: boolean = false,
+  qualityPreset: string = 'balanced',
+  outputFormat: string = 'mp4'
+): Promise<ConversionResult> {
+  return invoke<ConversionResult>('upscale_video', {
+    inputPath,
+    outputPath,
+    scaleFactor,
+    modelName,
+    useHwAccel,
+    useHevc,
+    qualityPreset,
+    outputFormat,
+  });
+}
+
 // Subscribe to conversion progress events
 export async function subscribeToProgress(
     callback: (event: ProgressEvent) => void

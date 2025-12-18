@@ -85,6 +85,20 @@ pub async fn check_ffmpeg_availability() -> Result<FFmpegStatus, String> {
 
     let rife_available = rife_path.is_some();
 
+    // Check Real-ESRGAN availability
+    let realesrgan_result = Command::new("which")
+        .arg("realesrgan-ncnn-vulkan")
+        .output()
+        .await;
+    
+    let realesrgan_path = realesrgan_result
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let realesrgan_available = realesrgan_path.is_some();
+
     let available = ffmpeg_path.is_some() && ffprobe_path.is_some();
 
     Ok(FFmpegStatus {
@@ -96,6 +110,8 @@ pub async fn check_ffmpeg_availability() -> Result<FFmpegStatus, String> {
         hevc_available,
         rife_available,
         rife_path,
+        realesrgan_available,
+        realesrgan_path,
     })
 }
 
@@ -896,5 +912,294 @@ where
     log::info!("RIFE conversion complete: {} -> {}", input_path, output_path);
 
     Ok(output_info.duration)
+}
+
+/// Upscale video using Real-ESRGAN AI
+/// Process: Extract frames -> Real-ESRGAN upscale -> Encode with ffmpeg
+pub async fn upscale_video_realesrgan<F>(
+    input_path: &str,
+    output_path: &str,
+    scale_factor: u32,
+    model_name: &str,
+    use_hw_accel: bool,
+    use_hevc: bool,
+    quality_preset: Option<&str>,
+    output_format: &str,
+    cancel_flag: Arc<AtomicBool>,
+    progress_callback: F,
+) -> Result<(), String>
+where
+    F: Fn(ProgressEvent) + Send + 'static,
+{
+    use tokio::fs;
+
+    log::info!("Starting Real-ESRGAN upscale: {}x with model {}", scale_factor, model_name);
+
+    // Get input video info
+    let input_info = get_video_info(input_path).await?;
+    let input_duration = input_info.duration;
+    let input_fps = input_info.fps;
+
+    // Create temporary directories
+    let temp_dir = std::env::temp_dir().join(format!("vmagic_upscale_{}", std::process::id()));
+    let input_frames_dir = temp_dir.join("input");
+    let output_frames_dir = temp_dir.join("output");
+
+    fs::create_dir_all(&input_frames_dir).await
+        .map_err(|e| format!("一時ディレクトリ作成エラー: {}", e))?;
+    fs::create_dir_all(&output_frames_dir).await
+        .map_err(|e| format!("一時ディレクトリ作成エラー: {}", e))?;
+
+    let cleanup = || async {
+        let _ = fs::remove_dir_all(&temp_dir).await;
+    };
+
+    // Phase 1: Extract frames (20% of progress)
+    log::info!("Phase 1: Extracting frames...");
+    progress_callback(ProgressEvent {
+        progress: 0.0,
+        frame: 0,
+        fps: 0.0,
+        time: "00:00:00.00".to_string(),
+        speed: "フレーム抽出中...".to_string(),
+    });
+
+    let extract_output = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-i", input_path,
+            "-qscale:v", "2",
+            &format!("{}/frame_%08d.png", input_frames_dir.display()),
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("フレーム抽出エラー: {}", e))?;
+
+    if !extract_output.status.success() {
+        cleanup().await;
+        return Err("フレーム抽出に失敗しました".to_string());
+    }
+
+    // Count extracted frames
+    let mut frame_count = 0;
+    if let Ok(mut entries) = fs::read_dir(&input_frames_dir).await {
+        while let Ok(Some(_)) = entries.next_entry().await {
+            frame_count += 1;
+        }
+    }
+    log::info!("Extracted {} frames", frame_count);
+
+    if frame_count == 0 {
+        cleanup().await;
+        return Err("フレームが抽出できませんでした".to_string());
+    }
+
+    if cancel_flag.load(Ordering::SeqCst) {
+        cleanup().await;
+        return Err("変換がキャンセルされました".to_string());
+    }
+
+    progress_callback(ProgressEvent {
+        progress: 20.0,
+        frame: 0,
+        fps: 0.0,
+        time: "00:00:00.00".to_string(),
+        speed: "アップスケール中...".to_string(),
+    });
+
+    // Phase 2: Real-ESRGAN upscale (60% of progress)
+    log::info!("Phase 2: Running Real-ESRGAN upscale ({}x, model: {})...", scale_factor, model_name);
+
+    let realesrgan_output = Command::new("realesrgan-ncnn-vulkan")
+        .args([
+            "-i", &input_frames_dir.to_string_lossy(),
+            "-o", &output_frames_dir.to_string_lossy(),
+            "-s", &scale_factor.to_string(),
+            "-n", model_name,
+            "-f", "png",
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("Real-ESRGAN実行エラー: {}", e))?;
+
+    if !realesrgan_output.status.success() {
+        let stderr = String::from_utf8_lossy(&realesrgan_output.stderr);
+        log::error!("Real-ESRGAN error: {}", stderr);
+        cleanup().await;
+        return Err(format!("Real-ESRGANアップスケールに失敗しました: {}", stderr));
+    }
+
+    // Count output frames
+    let mut output_frame_count = 0;
+    if let Ok(mut entries) = fs::read_dir(&output_frames_dir).await {
+        while let Ok(Some(_)) = entries.next_entry().await {
+            output_frame_count += 1;
+        }
+    }
+    log::info!("Real-ESRGAN processed {} frames", output_frame_count);
+
+    if output_frame_count == 0 {
+        cleanup().await;
+        return Err("Real-ESRGANがフレームを生成できませんでした".to_string());
+    }
+
+    if cancel_flag.load(Ordering::SeqCst) {
+        cleanup().await;
+        return Err("変換がキャンセルされました".to_string());
+    }
+
+    progress_callback(ProgressEvent {
+        progress: 80.0,
+        frame: 0,
+        fps: 0.0,
+        time: "00:00:00.00".to_string(),
+        speed: "エンコード中...".to_string(),
+    });
+
+    // Phase 3: Encode upscaled frames (20% of progress)
+    log::info!("Phase 3: Encoding to video...");
+
+    // Extract audio from original video
+    let audio_path = temp_dir.join("audio.aac");
+    let _ = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-i", input_path,
+            "-vn",
+            "-acodec", "copy",
+            &audio_path.to_string_lossy(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await;
+
+    let has_audio = audio_path.exists();
+
+    // Build encoding arguments
+    let mut encode_args = vec![
+        "-y".to_string(),
+        "-framerate".to_string(),
+        input_fps.to_string(),
+        "-i".to_string(),
+        format!("{}/frame_%08d.png", output_frames_dir.display()),
+    ];
+
+    if has_audio {
+        encode_args.extend([
+            "-i".to_string(),
+            audio_path.to_string_lossy().to_string(),
+        ]);
+    }
+
+    // Determine quality
+    let quality = match quality_preset {
+        Some("fast") => 50,
+        Some("balanced") => 65,
+        Some("quality") => 80,
+        _ => 65,
+    };
+
+    // Add video codec settings based on output format
+    match output_format {
+        "webm" => {
+            let crf = match quality_preset {
+                Some("fast") => "35",
+                Some("balanced") => "30",
+                Some("quality") => "25",
+                _ => "30",
+            };
+            encode_args.extend([
+                "-c:v".to_string(),
+                "libvpx-vp9".to_string(),
+                "-crf".to_string(),
+                crf.to_string(),
+                "-b:v".to_string(),
+                "0".to_string(),
+            ]);
+        }
+        _ => {
+            if use_hw_accel {
+                if use_hevc {
+                    encode_args.extend([
+                        "-c:v".to_string(),
+                        "hevc_videotoolbox".to_string(),
+                        "-q:v".to_string(),
+                        quality.to_string(),
+                        "-tag:v".to_string(),
+                        "hvc1".to_string(),
+                    ]);
+                } else {
+                    encode_args.extend([
+                        "-c:v".to_string(),
+                        "h264_videotoolbox".to_string(),
+                        "-q:v".to_string(),
+                        quality.to_string(),
+                    ]);
+                }
+            } else {
+                let crf = match quality_preset {
+                    Some("fast") => "23",
+                    Some("balanced") => "18",
+                    Some("quality") => "15",
+                    _ => "18",
+                };
+                encode_args.extend([
+                    "-c:v".to_string(),
+                    "libx264".to_string(),
+                    "-preset".to_string(),
+                    "medium".to_string(),
+                    "-crf".to_string(),
+                    crf.to_string(),
+                ]);
+            }
+        }
+    }
+
+    // Add audio settings
+    if has_audio {
+        let audio_codec = match output_format {
+            "webm" => "libopus",
+            _ => "aac",
+        };
+        encode_args.extend([
+            "-c:a".to_string(),
+            audio_codec.to_string(),
+            "-b:a".to_string(),
+            "192k".to_string(),
+            "-map".to_string(),
+            "0:v".to_string(),
+            "-map".to_string(),
+            "1:a".to_string(),
+        ]);
+    }
+
+    encode_args.push(output_path.to_string());
+
+    let encode_status = Command::new("ffmpeg")
+        .args(&encode_args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map_err(|e| format!("エンコードエラー: {}", e))?;
+
+    cleanup().await;
+
+    if !encode_status.success() {
+        return Err("動画エンコードに失敗しました".to_string());
+    }
+
+    progress_callback(ProgressEvent {
+        progress: 100.0,
+        frame: 0,
+        fps: 0.0,
+        time: format_time(input_duration),
+        speed: "完了".to_string(),
+    });
+
+    log::info!("Real-ESRGAN upscale complete: {} -> {}", input_path, output_path);
+
+    Ok(())
 }
 

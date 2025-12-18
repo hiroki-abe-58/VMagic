@@ -1,16 +1,17 @@
-# VMagic - Video FPS Converter
+# VMagic - Video FPS Converter & AI Upscaler
 
 [Japanese / 日本語](README.md)
 
-A desktop application for video frame rate conversion using ffmpeg's minterpolate filter.
-**Duration preservation guarantee** is the core feature.
+A desktop application for video frame rate conversion and AI upscaling.
+**Duration preservation guarantee** and **Apple Silicon optimization** are core features.
 
 ## Features
 
 - **Apple Silicon acceleration**: Hardware encoding via VideoToolbox (M1/M2/M3)
+- **AI Upscaling (Real-ESRGAN)**: Upscale videos 2x/3x/4x with AI models for both live-action and anime
 - **Batch processing support**: Convert multiple files at once
 - **Thumbnail preview**: Auto-generates video thumbnails and displays them in the file list
-- **Minterpolate-based frame interpolation**: Smooth conversion with high-quality frame interpolation
+- **Multiple frame interpolation methods**: Choose from RIFE (AI), minterpolate, framerate, or fps
 - **Duration preservation guarantee**: Ensures duration difference within ±0.1 seconds before and after conversion
 - **Real-time progress display**: Shows progress, frame count, and processing speed during conversion
 - **Preset support**: 24fps (Cinema), 25fps (PAL), 29.97fps (NTSC), 30fps, 50fps, 59.94fps, 60fps
@@ -46,6 +47,36 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 Node.js 18.x or higher recommended
 
+### 4. Real-ESRGAN (Optional - for AI Upscaling)
+
+```bash
+# Download from GitHub
+curl -L -o realesrgan.zip https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases/download/v0.2.0/realesrgan-ncnn-vulkan-v0.2.0-macos.zip
+unzip realesrgan.zip
+
+# Add to PATH
+sudo cp realesrgan-ncnn-vulkan-v0.2.0-macos/realesrgan-ncnn-vulkan /usr/local/bin/
+
+# Verify
+realesrgan-ncnn-vulkan -h
+```
+
+### 5. RIFE (Optional - for AI Frame Interpolation)
+
+```bash
+# Download from GitHub
+curl -L -o rife.zip https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-macos.zip
+unzip rife.zip
+
+# Add to PATH
+sudo cp rife-ncnn-vulkan-20221029-macos/rife-ncnn-vulkan /usr/local/bin/
+sudo mkdir -p /usr/local/share/rife-ncnn-vulkan
+sudo cp -r rife-ncnn-vulkan-20221029-macos/rife* /usr/local/share/rife-ncnn-vulkan/
+
+# Verify
+rife-ncnn-vulkan -h
+```
+
 ## Installation
 
 ```bash
@@ -77,6 +108,28 @@ npm run tauri:build
 6. Conversion status for each file is displayed in real-time
 7. Cancel anytime if needed
 
+## AI Upscaling (Real-ESRGAN)
+
+Upscale video resolution using AI. Uses GPU processing via Vulkan on Apple Silicon.
+
+### Scale Factors
+- **2x**: 1920x1080 → 3840x2160
+- **3x**: 1920x1080 → 5760x3240
+- **4x**: 1920x1080 → 7680x4320
+
+### AI Models
+
+| Model | Features | Use Case |
+|-------|----------|----------|
+| Real-ESRGAN x4plus | General purpose | Live-action / Illustration |
+| Real-ESRGAN x4plus Anime | Anime-optimized | Anime / Illustration |
+| RealESR AnimeVideo v3 | Video-specific | Anime videos, fast processing |
+
+### Processing Flow
+1. Extract frames (ffmpeg)
+2. Upscale each frame with Real-ESRGAN
+3. Re-encode to video (VideoToolbox or software)
+
 ## Frame Interpolation Methods
 
 Choose from 4 interpolation methods:
@@ -85,16 +138,7 @@ Choose from 4 interpolation methods:
 - **Quality**: Highest (natural frame generation by AI)
 - **Speed**: Fast (uses GPU/Vulkan)
 - **Features**: Deep learning-based optical flow estimation
-- **Requirements**: rife-ncnn-vulkan must be installed
-
-```bash
-# How to install RIFE
-# 1. Download from GitHub
-curl -L -o rife.zip https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-macos.zip
-unzip rife.zip
-# 2. Add to PATH (e.g., /usr/local/bin)
-sudo mv rife-ncnn-vulkan /usr/local/bin/
-```
+- **Requirements**: rife-ncnn-vulkan must be installed (see Prerequisites)
 
 ### 2. High Quality (minterpolate)
 ```bash
@@ -184,7 +228,11 @@ VMagic/
 ## Supported Formats
 
 - **Input**: MP4, MOV, AVI, MKV, WebM, FLV, M4V, WMV, MPG, MPEG
-- **Output**: MP4 (H.264)
+- **Output**: 
+  - MP4 (H.264/HEVC) - Best compatibility
+  - MOV (H.264/HEVC) - For Apple products
+  - WebM (VP9) - Web-optimized, transparency support
+  - MKV (H.264/HEVC) - High flexibility
 
 ## Hardware Acceleration
 

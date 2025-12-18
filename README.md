@@ -1,16 +1,17 @@
-# VMagic - Video FPS Converter
+# VMagic - Video FPS Converter & AI Upscaler
 
 [English](README.en.md)
 
-ffmpegのminterpolateフィルタを使用した動画フレームレート変換デスクトップアプリケーション。
-**総尺維持保証**が核心機能。
+動画フレームレート変換＆AI高画質化デスクトップアプリケーション。
+**総尺維持保証**と**Apple Silicon最適化**が核心機能。
 
 ## 特徴
 
 - **Apple Silicon高速化**: VideoToolboxによるハードウェアエンコードに対応（M1/M2/M3）
+- **AI高画質化 (Real-ESRGAN)**: 動画を2x/3x/4x拡大。実写・アニメ両対応のAIモデル
 - **バッチ処理対応**: 複数ファイルの一括変換に対応
 - **サムネイルプレビュー**: 動画のサムネイルを自動生成し、ファイルリストに表示
-- **minterpolateベースのフレーム補間**: 高品質なフレーム補間による滑らかな変換
+- **複数フレーム補間方式**: RIFE (AI)、minterpolate、framerate、fpsから選択
 - **総尺維持保証**: 変換前後の総尺差を±0.1秒以内に保証
 - **リアルタイム進捗表示**: 変換中の進捗、フレーム数、処理速度を表示
 - **プリセット対応**: 24fps（映画）、25fps（PAL）、29.97fps（NTSC）、30fps、50fps、59.94fps、60fps
@@ -46,6 +47,36 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 Node.js 18.x 以上を推奨
 
+### 4. Real-ESRGAN (オプション - AI高画質化用)
+
+```bash
+# GitHubからダウンロード
+curl -L -o realesrgan.zip https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases/download/v0.2.0/realesrgan-ncnn-vulkan-v0.2.0-macos.zip
+unzip realesrgan.zip
+
+# パスを通す
+sudo cp realesrgan-ncnn-vulkan-v0.2.0-macos/realesrgan-ncnn-vulkan /usr/local/bin/
+
+# 確認
+realesrgan-ncnn-vulkan -h
+```
+
+### 5. RIFE (オプション - AIフレーム補間用)
+
+```bash
+# GitHubからダウンロード
+curl -L -o rife.zip https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-macos.zip
+unzip rife.zip
+
+# パスを通す
+sudo cp rife-ncnn-vulkan-20221029-macos/rife-ncnn-vulkan /usr/local/bin/
+sudo mkdir -p /usr/local/share/rife-ncnn-vulkan
+sudo cp -r rife-ncnn-vulkan-20221029-macos/rife* /usr/local/share/rife-ncnn-vulkan/
+
+# 確認
+rife-ncnn-vulkan -h
+```
+
 ## インストール
 
 ```bash
@@ -77,6 +108,28 @@ npm run tauri:build
 6. 各ファイルの変換状況がリアルタイムで表示される
 7. 必要に応じてキャンセル可能
 
+## AI高画質化 (Real-ESRGAN)
+
+動画の解像度をAIでアップスケールします。Apple Silicon上でVulkan経由のGPU処理を使用。
+
+### 拡大率
+- **2x**: 1920x1080 → 3840x2160
+- **3x**: 1920x1080 → 5760x3240
+- **4x**: 1920x1080 → 7680x4320
+
+### AIモデル
+
+| モデル | 特徴 | 用途 |
+|--------|------|------|
+| Real-ESRGAN x4plus | 汎用モデル | 実写/イラスト両対応 |
+| Real-ESRGAN x4plus Anime | アニメ最適化 | アニメ/イラスト向け |
+| RealESR AnimeVideo v3 | 動画専用 | アニメ動画、高速処理 |
+
+### 処理フロー
+1. フレーム抽出 (ffmpeg)
+2. 各フレームをReal-ESRGANでアップスケール
+3. 動画に再エンコード (VideoToolbox or ソフトウェア)
+
 ## フレーム補間方式
 
 4つのフレーム補間方式から選択できます：
@@ -85,16 +138,7 @@ npm run tauri:build
 - **品質**: 最高（AIによる自然なフレーム生成）
 - **速度**: 高速（GPU/Vulkan使用）
 - **特徴**: ディープラーニングベースのオプティカルフロー推定
-- **要件**: rife-ncnn-vulkanのインストールが必要
-
-```bash
-# RIFEのインストール方法
-# 1. GitHubからダウンロード
-curl -L -o rife.zip https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-macos.zip
-unzip rife.zip
-# 2. パスを通す（例: /usr/local/bin）
-sudo mv rife-ncnn-vulkan /usr/local/bin/
-```
+- **要件**: rife-ncnn-vulkanのインストールが必要（前提条件参照）
 
 ### 2. 高品質 (minterpolate)
 ```bash
@@ -184,7 +228,11 @@ VMagic/
 ## 対応フォーマット
 
 - **入力**: MP4, MOV, AVI, MKV, WebM, FLV, M4V, WMV, MPG, MPEG
-- **出力**: MP4 (H.264)
+- **出力**: 
+  - MP4 (H.264/HEVC) - 最も互換性が高い
+  - MOV (H.264/HEVC) - Apple製品向け
+  - WebM (VP9) - Web向け、透過対応
+  - MKV (H.264/HEVC) - 高い柔軟性
 
 ## ハードウェア高速化
 

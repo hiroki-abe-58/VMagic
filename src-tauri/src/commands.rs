@@ -31,6 +31,8 @@ pub struct FFmpegStatus {
     pub hevc_available: bool,
     pub rife_available: bool,
     pub rife_path: Option<String>,
+    pub realesrgan_available: bool,
+    pub realesrgan_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -205,6 +207,106 @@ pub async fn convert_video(
 pub async fn cancel_conversion(state: State<'_, ConversionState>) -> Result<(), String> {
     state.cancel_flag.store(true, Ordering::SeqCst);
     Ok(())
+}
+
+/// Upscale video using Real-ESRGAN AI
+#[tauri::command]
+pub async fn upscale_video(
+    app: AppHandle,
+    input_path: String,
+    output_path: String,
+    scale_factor: u32,
+    model_name: String,
+    use_hw_accel: Option<bool>,
+    use_hevc: Option<bool>,
+    quality_preset: Option<String>,
+    output_format: Option<String>,
+    state: State<'_, ConversionState>,
+) -> Result<ConversionResult, String> {
+    // Check if already converting
+    {
+        let mut is_converting = state.is_converting.lock().await;
+        if *is_converting {
+            return Err("変換処理が既に実行中です".to_string());
+        }
+        *is_converting = true;
+    }
+
+    // Reset cancel flag
+    state.cancel_flag.store(false, Ordering::SeqCst);
+
+    let cancel_flag = state.cancel_flag.clone();
+    let is_converting = state.is_converting.clone();
+
+    // Get input video info
+    let input_info = ffmpeg::get_video_info(&input_path).await?;
+    let input_duration = input_info.duration;
+
+    let format = output_format.as_deref().unwrap_or("mp4");
+
+    // Run upscale
+    let result = ffmpeg::upscale_video_realesrgan(
+        &input_path,
+        &output_path,
+        scale_factor,
+        &model_name,
+        use_hw_accel.unwrap_or(true),
+        use_hevc.unwrap_or(false),
+        quality_preset.as_deref(),
+        format,
+        cancel_flag,
+        move |progress| {
+            let _ = app.emit("conversion-progress", progress);
+        },
+    )
+    .await;
+
+    // Reset converting flag
+    {
+        let mut converting = is_converting.lock().await;
+        *converting = false;
+    }
+
+    match result {
+        Ok(()) => {
+            // Get output info for validation
+            let output_info = ffmpeg::get_video_info(&output_path).await?;
+            let output_duration = output_info.duration;
+            let duration_diff = (output_duration - input_duration).abs();
+
+            let message = format!(
+                "アップスケール完了: {}x{} -> {}x{} ({}x)",
+                input_info.width, input_info.height,
+                output_info.width, output_info.height,
+                scale_factor
+            );
+
+            Ok(ConversionResult {
+                success: true,
+                output_path,
+                input_duration,
+                output_duration,
+                duration_diff,
+                duration_valid: duration_diff < 0.5,
+                message,
+            })
+        }
+        Err(e) => {
+            if e.contains("cancelled") || e.contains("キャンセル") {
+                Ok(ConversionResult {
+                    success: false,
+                    output_path,
+                    input_duration,
+                    output_duration: 0.0,
+                    duration_diff: 0.0,
+                    duration_valid: false,
+                    message: "アップスケールがキャンセルされました".to_string(),
+                })
+            } else {
+                Err(e)
+            }
+        }
+    }
 }
 
 /// Open directory selection dialog

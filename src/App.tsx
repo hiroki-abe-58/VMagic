@@ -6,16 +6,22 @@ import { BatchProgress } from './components/BatchProgress';
 import { checkFfmpeg } from './lib/tauri-commands';
 import { useBatchConvert } from './hooks/useBatchConvert';
 import { DEFAULT_FPS } from './lib/presets';
-import type { FFmpegStatus, QualityPreset, InterpolationMethod, OutputFormat } from './types/video';
+import type { FFmpegStatus, QualityPreset, InterpolationMethod, OutputFormat, UpscaleModel, UpscaleScale } from './types/video';
+
+type AppMode = 'fps' | 'upscale';
 
 function App() {
   const [ffmpegStatus, setFfmpegStatus] = useState<FFmpegStatus | null>(null);
+  const [appMode, setAppMode] = useState<AppMode>('fps');
   const [targetFps, setTargetFps] = useState(DEFAULT_FPS);
   const [useHwAccel, setUseHwAccel] = useState(true);
   const [useHevc, setUseHevc] = useState(false);
   const [qualityPreset, setQualityPreset] = useState<QualityPreset>('balanced');
   const [interpolationMethod, setInterpolationMethod] = useState<InterpolationMethod>('minterpolate');
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('mp4');
+  // Upscale settings
+  const [upscaleModel, setUpscaleModel] = useState<UpscaleModel>('realesrgan-x4plus');
+  const [upscaleScale, setUpscaleScale] = useState<UpscaleScale>(4);
 
   const {
     items,
@@ -50,6 +56,8 @@ function App() {
           hevc_available: false,
           rife_available: false,
           rife_path: null,
+          realesrgan_available: false,
+          realesrgan_path: null,
         });
       }
     };
@@ -65,14 +73,17 @@ function App() {
   const handleStartConversion = useCallback(async () => {
     if (items.length === 0) return;
     await startBatchConversion({
+      mode: appMode,
       targetFps,
       useHwAccel,
       useHevc,
       qualityPreset,
       interpolationMethod,
       outputFormat,
+      upscaleModel,
+      upscaleScale,
     });
-  }, [items, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod, outputFormat, startBatchConversion]);
+  }, [items, appMode, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod, outputFormat, upscaleModel, upscaleScale, startBatchConversion]);
 
   // Handle reset
   const handleReset = useCallback(() => {
@@ -113,6 +124,16 @@ function App() {
 
           {/* FFmpeg Status */}
           <div className="flex items-center gap-4">
+            {ffmpegStatus?.realesrgan_available && (
+              <div className="flex items-center gap-2 text-cyan-400 text-sm">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                    d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" 
+                  />
+                </svg>
+                <span>ESRGAN</span>
+              </div>
+            )}
             {ffmpegStatus?.rife_available && (
               <div className="flex items-center gap-2 text-purple-400 text-sm">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -176,6 +197,50 @@ function App() {
           )}
 
           <div className="space-y-6">
+            {/* Mode Selector */}
+            <div className="bg-dark-surface rounded-xl p-2 border border-dark-border flex">
+              <button
+                onClick={() => setAppMode('fps')}
+                disabled={isProcessing}
+                className={`
+                  flex-1 py-3 px-4 rounded-lg font-medium transition-all duration-200
+                  flex items-center justify-center gap-2
+                  ${appMode === 'fps'
+                    ? 'bg-neon-yellow text-dark-bg'
+                    : 'text-text-secondary hover:text-text-primary hover:bg-dark-surface-light'
+                  }
+                  ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                `}
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                    d="M13 10V3L4 14h7v7l9-11h-7z" 
+                  />
+                </svg>
+                FPS変換
+              </button>
+              <button
+                onClick={() => setAppMode('upscale')}
+                disabled={isProcessing}
+                className={`
+                  flex-1 py-3 px-4 rounded-lg font-medium transition-all duration-200
+                  flex items-center justify-center gap-2
+                  ${appMode === 'upscale'
+                    ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white'
+                    : 'text-text-secondary hover:text-text-primary hover:bg-dark-surface-light'
+                  }
+                  ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                `}
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                    d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" 
+                  />
+                </svg>
+                AI高画質化
+              </button>
+            </div>
+
             {/* Video Drop Zone */}
             <VideoDropZone 
               onFilesSelected={handleFilesSelected}
@@ -192,8 +257,8 @@ function App() {
               />
             )}
 
-            {/* FPS Settings */}
-            {hasFiles && (
+            {/* FPS Settings - only in FPS mode */}
+            {hasFiles && appMode === 'fps' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <FpsSettings 
                   currentFps={averageFps}
@@ -280,7 +345,8 @@ function App() {
                       </button>
                     </div>
 
-                    {/* Interpolation Method */}
+                    {/* Interpolation Method - FPS mode only */}
+                    {appMode === 'fps' && (
                     <div className="py-2 border-t border-dark-border">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-text-secondary text-sm">フレーム補間方式</span>
@@ -363,6 +429,7 @@ function App() {
                         </p>
                       )}
                     </div>
+                    )}
 
                     {/* Quality Preset */}
                     <div className="py-2 border-t border-dark-border">
@@ -427,6 +494,223 @@ function App() {
                         {outputFormat === 'webm' && 'WebM (VP9) - Web向け、透過対応'}
                         {outputFormat === 'mkv' && `MKV (${useHevc ? 'HEVC/H.265' : 'H.264'}) - 高い柔軟性`}
                       </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Upscale Settings - only in Upscale mode */}
+            {hasFiles && appMode === 'upscale' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Upscale Model Selection */}
+                <div className="bg-dark-surface rounded-xl p-6 border border-dark-border">
+                  <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+                    <svg className="w-5 h-5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" 
+                      />
+                    </svg>
+                    アップスケール設定
+                  </h2>
+
+                  {!ffmpegStatus?.realesrgan_available && (
+                    <div className="mb-4 p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg">
+                      <p className="text-sm text-orange-400">
+                        Real-ESRGAN未検出: AI高画質化を使用するにはrealesrgan-ncnn-vulkanをインストールしてください
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    {/* Scale Factor */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-text-secondary text-sm">拡大率</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {([2, 3, 4] as const).map((scale) => (
+                          <button
+                            key={scale}
+                            onClick={() => setUpscaleScale(scale)}
+                            disabled={isProcessing || !ffmpegStatus?.realesrgan_available}
+                            className={`
+                              py-3 px-3 rounded-lg text-lg font-bold transition-colors duration-200
+                              ${upscaleScale === scale
+                                ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white'
+                                : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                              }
+                              ${(isProcessing || !ffmpegStatus?.realesrgan_available) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                            `}
+                          >
+                            {scale}x
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-xs text-text-muted mt-2">
+                        {items[0]?.videoInfo && (
+                          <>
+                            {items[0].videoInfo.width}x{items[0].videoInfo.height} 
+                            {' -> '}
+                            {items[0].videoInfo.width * upscaleScale}x{items[0].videoInfo.height * upscaleScale}
+                          </>
+                        )}
+                      </p>
+                    </div>
+
+                    {/* Model Selection */}
+                    <div className="pt-4 border-t border-dark-border">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-text-secondary text-sm">AIモデル</span>
+                      </div>
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => setUpscaleModel('realesrgan-x4plus')}
+                          disabled={isProcessing || !ffmpegStatus?.realesrgan_available}
+                          className={`
+                            w-full py-3 px-4 rounded-lg text-sm font-medium transition-colors duration-200 text-left
+                            ${upscaleModel === 'realesrgan-x4plus'
+                              ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white'
+                              : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                            }
+                            ${(isProcessing || !ffmpegStatus?.realesrgan_available) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                          `}
+                        >
+                          <div className="font-semibold">Real-ESRGAN x4plus</div>
+                          <div className="text-xs opacity-80">汎用モデル - 実写/イラスト両対応</div>
+                        </button>
+                        <button
+                          onClick={() => setUpscaleModel('realesrgan-x4plus-anime')}
+                          disabled={isProcessing || !ffmpegStatus?.realesrgan_available}
+                          className={`
+                            w-full py-3 px-4 rounded-lg text-sm font-medium transition-colors duration-200 text-left
+                            ${upscaleModel === 'realesrgan-x4plus-anime'
+                              ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white'
+                              : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                            }
+                            ${(isProcessing || !ffmpegStatus?.realesrgan_available) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                          `}
+                        >
+                          <div className="font-semibold">Real-ESRGAN x4plus Anime</div>
+                          <div className="text-xs opacity-80">アニメ/イラスト最適化</div>
+                        </button>
+                        <button
+                          onClick={() => setUpscaleModel('realesr-animevideov3')}
+                          disabled={isProcessing || !ffmpegStatus?.realesrgan_available}
+                          className={`
+                            w-full py-3 px-4 rounded-lg text-sm font-medium transition-colors duration-200 text-left
+                            ${upscaleModel === 'realesr-animevideov3'
+                              ? 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white'
+                              : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                            }
+                            ${(isProcessing || !ffmpegStatus?.realesrgan_available) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                          `}
+                        >
+                          <div className="font-semibold">RealESR AnimeVideo v3</div>
+                          <div className="text-xs opacity-80">アニメ動画専用 - 高速処理</div>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Encoding Settings for Upscale */}
+                <div className="bg-dark-surface rounded-xl p-6 border border-dark-border">
+                  <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+                    <svg className="w-5 h-5 text-neon-yellow" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                      />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    エンコード設定
+                  </h2>
+                  <div className="space-y-4">
+                    {/* Hardware Acceleration Toggle */}
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-text-secondary text-sm">ハードウェア高速化</span>
+                        {ffmpegStatus?.videotoolbox_available ? (
+                          <span className="text-xs px-2 py-0.5 rounded bg-neon-yellow/20 text-neon-yellow">
+                            VideoToolbox
+                          </span>
+                        ) : (
+                          <span className="text-xs px-2 py-0.5 rounded bg-dark-bg text-text-muted">
+                            利用不可
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setUseHwAccel(!useHwAccel)}
+                        disabled={!ffmpegStatus?.videotoolbox_available || isProcessing}
+                        className={`
+                          relative w-12 h-6 rounded-full transition-colors duration-200
+                          ${useHwAccel && ffmpegStatus?.videotoolbox_available
+                            ? 'bg-neon-yellow' 
+                            : 'bg-dark-bg'
+                          }
+                          ${(!ffmpegStatus?.videotoolbox_available || isProcessing) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                        `}
+                      >
+                        <div className={`
+                          absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200
+                          ${useHwAccel && ffmpegStatus?.videotoolbox_available ? 'translate-x-7' : 'translate-x-1'}
+                        `} />
+                      </button>
+                    </div>
+
+                    {/* Quality Preset */}
+                    <div className="py-2 border-t border-dark-border">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-text-secondary text-sm">エンコード品質</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(['fast', 'balanced', 'quality'] as QualityPreset[]).map((preset) => (
+                          <button
+                            key={preset}
+                            onClick={() => setQualityPreset(preset)}
+                            disabled={isProcessing}
+                            className={`
+                              py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200
+                              ${qualityPreset === preset
+                                ? 'bg-neon-yellow text-dark-bg'
+                                : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                              }
+                              ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                            `}
+                          >
+                            {preset === 'fast' && '高速'}
+                            {preset === 'balanced' && 'バランス'}
+                            {preset === 'quality' && '高品質'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Output Format */}
+                    <div className="py-2 border-t border-dark-border">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-text-secondary text-sm">出力形式</span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {(['mp4', 'mov', 'webm', 'mkv'] as OutputFormat[]).map((format) => (
+                          <button
+                            key={format}
+                            onClick={() => setOutputFormat(format)}
+                            disabled={isProcessing}
+                            className={`
+                              py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200 uppercase
+                              ${outputFormat === format
+                                ? 'bg-green-500 text-white'
+                                : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                              }
+                              ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                            `}
+                          >
+                            {format}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -506,7 +790,7 @@ function App() {
                           d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" 
                         />
                       </svg>
-                      バッチ変換開始 ({readyFiles.length}ファイル)
+                      {appMode === 'fps' ? 'バッチ変換開始' : 'バッチ高画質化開始'} ({readyFiles.length}ファイル)
                     </button>
                   </>
                 )}

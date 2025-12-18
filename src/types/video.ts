@@ -14,14 +14,16 @@ export interface VideoInfo {
 
 // FFmpeg availability status
 export interface FFmpegStatus {
-    available: boolean;
-    ffmpeg_path: string | null;
-    ffprobe_path: string | null;
-    version: string | null;
-    videotoolbox_available: boolean;
-    hevc_available: boolean;
-    rife_available: boolean;
-    rife_path: string | null;
+  available: boolean;
+  ffmpeg_path: string | null;
+  ffprobe_path: string | null;
+  version: string | null;
+  videotoolbox_available: boolean;
+  hevc_available: boolean;
+  rife_available: boolean;
+  rife_path: string | null;
+  realesrgan_available: boolean;
+  realesrgan_path: string | null;
 }
 
 // Quality preset options
@@ -32,6 +34,12 @@ export type InterpolationMethod = 'minterpolate' | 'framerate' | 'duplicate' | '
 
 // Output format options
 export type OutputFormat = 'mp4' | 'mov' | 'webm' | 'mkv';
+
+// Upscale model options
+export type UpscaleModel = 'realesrgan-x4plus' | 'realesrgan-x4plus-anime' | 'realesr-animevideov3';
+
+// Upscale scale factor
+export type UpscaleScale = 2 | 3 | 4;
 
 // Conversion progress event
 export interface ProgressEvent {

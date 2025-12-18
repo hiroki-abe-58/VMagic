@@ -24,6 +24,7 @@ pub fn run() {
             check_ffmpeg,
             get_video_info,
             convert_video,
+            upscale_video,
             cancel_conversion,
             select_output_directory,
         ])
