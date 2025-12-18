@@ -43,63 +43,63 @@ export type UpscaleScale = 2 | 3 | 4;
 
 // Target resolution presets
 export interface TargetResolution {
-  name: string;
-  width: number;
-  height: number;
-  shortName: string;
+    name: string;
+    width: number;
+    height: number;
+    shortName: string;
 }
 
 export const TARGET_RESOLUTIONS: TargetResolution[] = [
-  { name: 'HD (720p)', width: 1280, height: 720, shortName: '720p' },
-  { name: 'Full HD (1080p)', width: 1920, height: 1080, shortName: 'FHD' },
-  { name: '2K (1440p)', width: 2560, height: 1440, shortName: '2K' },
-  { name: '4K UHD', width: 3840, height: 2160, shortName: '4K' },
-  { name: '5K', width: 5120, height: 2880, shortName: '5K' },
-  { name: '8K UHD', width: 7680, height: 4320, shortName: '8K' },
+    { name: 'HD (720p)', width: 1280, height: 720, shortName: '720p' },
+    { name: 'Full HD (1080p)', width: 1920, height: 1080, shortName: 'FHD' },
+    { name: '2K (1440p)', width: 2560, height: 1440, shortName: '2K' },
+    { name: '4K UHD', width: 3840, height: 2160, shortName: '4K' },
+    { name: '5K', width: 5120, height: 2880, shortName: '5K' },
+    { name: '8K UHD', width: 7680, height: 4320, shortName: '8K' },
 ];
 
 // Calculate required scale factor for target resolution
 export function calculateScaleFactor(
-  inputWidth: number,
-  inputHeight: number,
-  targetWidth: number,
-  targetHeight: number
+    inputWidth: number,
+    inputHeight: number,
+    targetWidth: number,
+    targetHeight: number
 ): UpscaleScale | null {
-  const scaleX = targetWidth / inputWidth;
-  const scaleY = targetHeight / inputHeight;
-  const requiredScale = Math.max(scaleX, scaleY);
-  
-  // If input is already larger than target, no upscaling needed
-  if (requiredScale <= 1) {
-    return null;
-  }
-  
-  // Round up to nearest supported scale (2, 3, or 4)
-  if (requiredScale <= 2) return 2;
-  if (requiredScale <= 3) return 3;
-  if (requiredScale <= 4) return 4;
-  
-  // If scale > 4, we need multiple passes (not supported yet)
-  return 4;
+    const scaleX = targetWidth / inputWidth;
+    const scaleY = targetHeight / inputHeight;
+    const requiredScale = Math.max(scaleX, scaleY);
+
+    // If input is already larger than target, no upscaling needed
+    if (requiredScale <= 1) {
+        return null;
+    }
+
+    // Round up to nearest supported scale (2, 3, or 4)
+    if (requiredScale <= 2) return 2;
+    if (requiredScale <= 3) return 3;
+    if (requiredScale <= 4) return 4;
+
+    // If scale > 4, we need multiple passes (not supported yet)
+    return 4;
 }
 
 // Get available target resolutions based on input size
 export function getAvailableResolutions(
-  inputWidth: number,
-  inputHeight: number
+    inputWidth: number,
+    inputHeight: number
 ): (TargetResolution & { scale: UpscaleScale; outputWidth: number; outputHeight: number })[] {
-  return TARGET_RESOLUTIONS
-    .map(res => {
-      const scale = calculateScaleFactor(inputWidth, inputHeight, res.width, res.height);
-      if (!scale) return null;
-      return {
-        ...res,
-        scale,
-        outputWidth: inputWidth * scale,
-        outputHeight: inputHeight * scale,
-      };
-    })
-    .filter((res): res is NonNullable<typeof res> => res !== null);
+    return TARGET_RESOLUTIONS
+        .map(res => {
+            const scale = calculateScaleFactor(inputWidth, inputHeight, res.width, res.height);
+            if (!scale) return null;
+            return {
+                ...res,
+                scale,
+                outputWidth: inputWidth * scale,
+                outputHeight: inputHeight * scale,
+            };
+        })
+        .filter((res): res is NonNullable<typeof res> => res !== null);
 }
 
 // Conversion progress event
