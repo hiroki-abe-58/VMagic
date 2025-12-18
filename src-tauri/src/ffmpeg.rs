@@ -596,22 +596,22 @@ where
         speed: "フレーム抽出中...".to_string(),
     });
 
-    let extract_status = Command::new("ffmpeg")
+    let extract_output = Command::new("ffmpeg")
         .args([
             "-y",
             "-i", input_path,
             "-qscale:v", "2",
             &format!("{}/frame_%08d.png", input_frames_dir.display()),
         ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .output()
         .await
         .map_err(|e| format!("フレーム抽出エラー: {}", e))?;
 
-    if !extract_status.success() {
+    if !extract_output.status.success() {
+        let stderr = String::from_utf8_lossy(&extract_output.stderr);
+        log::error!("Frame extraction error: {}", stderr);
         cleanup().await;
-        return Err("フレーム抽出に失敗しました".to_string());
+        return Err(format!("フレーム抽出に失敗しました: {}", stderr));
     }
 
     if cancel_flag.load(Ordering::SeqCst) {
@@ -627,26 +627,69 @@ where
         speed: "RIFE補間中...".to_string(),
     });
 
+    // Count extracted frames
+    let mut frame_count = 0;
+    if let Ok(mut entries) = tokio::fs::read_dir(&input_frames_dir).await {
+        while let Ok(Some(_)) = entries.next_entry().await {
+            frame_count += 1;
+        }
+    }
+    log::info!("Extracted {} frames", frame_count);
+
+    if frame_count == 0 {
+        cleanup().await;
+        return Err("フレームが抽出できませんでした".to_string());
+    }
+
     // Phase 2: Run RIFE interpolation (50% of progress)
     log::info!("Phase 2: Running RIFE interpolation ({}x)...", rife_multiplier);
 
-    let rife_status = Command::new("rife-ncnn-vulkan")
+    // Find model directory
+    let model_dir = if std::path::Path::new("/usr/local/share/rife-ncnn-vulkan/rife-v4.6").exists() {
+        "/usr/local/share/rife-ncnn-vulkan/rife-v4.6".to_string()
+    } else if std::path::Path::new("/usr/local/share/rife-ncnn-vulkan/rife-v4").exists() {
+        "/usr/local/share/rife-ncnn-vulkan/rife-v4".to_string()
+    } else {
+        "rife-v4.6".to_string() // fallback to relative path
+    };
+
+    log::info!("Using RIFE model: {}", model_dir);
+
+    // Calculate target frame count (input frames * multiplier)
+    let target_frame_count = frame_count * rife_multiplier as usize;
+    log::info!("Target frame count: {} ({}x{})", target_frame_count, frame_count, rife_multiplier);
+
+    let rife_output = Command::new("rife-ncnn-vulkan")
         .args([
             "-i", &input_frames_dir.to_string_lossy(),
             "-o", &output_frames_dir.to_string_lossy(),
-            "-m", "rife-v4.6",
-            "-n", &rife_multiplier.to_string(),
+            "-m", &model_dir,
+            "-n", &target_frame_count.to_string(),
             "-f", "frame_%08d.png",
         ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .output()
         .await
         .map_err(|e| format!("RIFE実行エラー: {}", e))?;
 
-    if !rife_status.success() {
+    if !rife_output.status.success() {
+        let stderr = String::from_utf8_lossy(&rife_output.stderr);
+        log::error!("RIFE error: {}", stderr);
         cleanup().await;
-        return Err("RIFEフレーム補間に失敗しました".to_string());
+        return Err(format!("RIFEフレーム補間に失敗しました: {}", stderr));
+    }
+
+    // Count output frames
+    let mut output_frame_count = 0;
+    if let Ok(mut entries) = tokio::fs::read_dir(&output_frames_dir).await {
+        while let Ok(Some(_)) = entries.next_entry().await {
+            output_frame_count += 1;
+        }
+    }
+    log::info!("RIFE generated {} frames (expected ~{})", output_frame_count, frame_count * rife_multiplier as usize);
+
+    if output_frame_count == 0 {
+        cleanup().await;
+        return Err("RIFEがフレームを生成できませんでした".to_string());
     }
 
     if cancel_flag.load(Ordering::SeqCst) {
@@ -682,11 +725,15 @@ where
 
     let has_audio = audio_path.exists();
 
+    // Calculate actual output framerate based on generated frames and original duration
+    let actual_output_fps = output_frame_count as f64 / input_duration;
+    log::info!("Encoding at {} fps ({} frames / {} seconds)", actual_output_fps, output_frame_count, input_duration);
+
     // Build encoding arguments
     let mut encode_args = vec![
         "-y".to_string(),
         "-framerate".to_string(),
-        actual_target_fps.to_string(),
+        actual_output_fps.to_string(),
         "-i".to_string(),
         format!("{}/frame_%08d.png", output_frames_dir.display()),
     ];
@@ -756,8 +803,9 @@ where
         ]);
     }
 
-    // If target_fps differs from actual_target_fps, add fps filter to adjust
-    if (target_fps - actual_target_fps).abs() > 0.01 {
+    // If target_fps differs from actual output fps, add fps filter to adjust
+    if (target_fps - actual_output_fps).abs() > 1.0 {
+        log::info!("Adjusting framerate from {} to {}", actual_output_fps, target_fps);
         encode_args.extend([
             "-filter:v".to_string(),
             format!("fps={}", target_fps),
