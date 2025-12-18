@@ -162,12 +162,9 @@ pub async fn cancel_conversion(state: State<'_, ConversionState>) -> Result<(), 
 }
 
 /// Open directory selection dialog
+/// Note: Currently handled by frontend using @tauri-apps/plugin-dialog
 #[tauri::command]
 pub async fn select_output_directory() -> Result<Option<String>, String> {
-    use tauri_plugin_dialog::DialogExt;
-
-    // Note: This needs to be called from the main thread
-    // For now, return a placeholder - will be handled by frontend
     Ok(None)
 }
 
