@@ -14,16 +14,16 @@ export interface VideoInfo {
 
 // FFmpeg availability status
 export interface FFmpegStatus {
-  available: boolean;
-  ffmpeg_path: string | null;
-  ffprobe_path: string | null;
-  version: string | null;
-  videotoolbox_available: boolean;
-  hevc_available: boolean;
-  rife_available: boolean;
-  rife_path: string | null;
-  realesrgan_available: boolean;
-  realesrgan_path: string | null;
+    available: boolean;
+    ffmpeg_path: string | null;
+    ffprobe_path: string | null;
+    version: string | null;
+    videotoolbox_available: boolean;
+    hevc_available: boolean;
+    rife_available: boolean;
+    rife_path: string | null;
+    realesrgan_available: boolean;
+    realesrgan_path: string | null;
 }
 
 // Quality preset options
