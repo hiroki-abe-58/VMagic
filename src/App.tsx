@@ -6,10 +6,10 @@ import { BatchProgress } from './components/BatchProgress';
 import { checkFfmpeg } from './lib/tauri-commands';
 import { useBatchConvert } from './hooks/useBatchConvert';
 import { DEFAULT_FPS } from './lib/presets';
-import type { FFmpegStatus, QualityPreset, InterpolationMethod, OutputFormat, UpscaleModel, UpscaleScale, TargetResolution } from './types/video';
-import { TARGET_RESOLUTIONS, getAvailableResolutions } from './types/video';
+import type { FFmpegStatus, QualityPreset, InterpolationMethod, OutputFormat, UpscaleModel, UpscaleScale, TargetResolution, DownscaleResolution } from './types/video';
+import { TARGET_RESOLUTIONS, getAvailableResolutions, FILE_SIZE_PRESETS, DOWNSCALE_RESOLUTIONS, getAvailableDownscaleResolutions, calculateTargetBitrate } from './types/video';
 
-type AppMode = 'fps' | 'upscale';
+type AppMode = 'fps' | 'upscale' | 'compress';
 
 function App() {
   const [ffmpegStatus, setFfmpegStatus] = useState<FFmpegStatus | null>(null);
@@ -25,6 +25,9 @@ function App() {
   const [upscaleScale, setUpscaleScale] = useState<UpscaleScale>(4);
   const [upscaleMode, setUpscaleMode] = useState<'resolution' | 'scale'>('resolution');
   const [targetResolution, setTargetResolution] = useState<TargetResolution | null>(TARGET_RESOLUTIONS[3]); // Default to 4K
+  // Compression settings
+  const [targetSizeMb, setTargetSizeMb] = useState<number>(25);
+  const [compressResolution, setCompressResolution] = useState<DownscaleResolution>(DOWNSCALE_RESOLUTIONS[0]); // Original
 
   const {
     items,
@@ -85,8 +88,11 @@ function App() {
       outputFormat,
       upscaleModel,
       upscaleScale,
+      targetSizeMb,
+      compressWidth: compressResolution.width > 0 ? compressResolution.width : null,
+      compressHeight: compressResolution.height > 0 ? compressResolution.height : null,
     });
-  }, [items, appMode, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod, outputFormat, upscaleModel, upscaleScale, startBatchConversion]);
+  }, [items, appMode, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod, outputFormat, upscaleModel, upscaleScale, targetSizeMb, compressResolution, startBatchConversion]);
 
   // Handle reset
   const handleReset = useCallback(() => {
@@ -241,6 +247,26 @@ function App() {
                   />
                 </svg>
                 AI高画質化
+              </button>
+              <button
+                onClick={() => setAppMode('compress')}
+                disabled={isProcessing}
+                className={`
+                  flex-1 py-3 px-4 rounded-lg font-medium transition-all duration-200
+                  flex items-center justify-center gap-2
+                  ${appMode === 'compress'
+                    ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white'
+                    : 'text-text-secondary hover:text-text-primary hover:bg-dark-surface-light'
+                  }
+                  ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                `}
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                    d="M19 14l-7 7m0 0l-7-7m7 7V3" 
+                  />
+                </svg>
+                圧縮
               </button>
             </div>
 
@@ -809,6 +835,207 @@ function App() {
               </div>
             )}
 
+            {/* Compression Settings - only in Compress mode */}
+            {hasFiles && appMode === 'compress' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Target Size Selection */}
+                <div className="bg-dark-surface rounded-xl p-6 border border-dark-border">
+                  <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+                    <svg className="w-5 h-5 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M19 14l-7 7m0 0l-7-7m7 7V3" 
+                      />
+                    </svg>
+                    圧縮設定
+                  </h2>
+
+                  <div className="space-y-4">
+                    {/* Target File Size */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-text-secondary text-sm">目標ファイルサイズ</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {FILE_SIZE_PRESETS.map((preset) => (
+                          <button
+                            key={preset.sizeMB}
+                            onClick={() => setTargetSizeMb(preset.sizeMB)}
+                            disabled={isProcessing}
+                            className={`
+                              py-3 px-3 rounded-lg text-sm font-medium transition-colors duration-200 text-left
+                              ${targetSizeMb === preset.sizeMB
+                                ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white'
+                                : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                              }
+                              ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                            `}
+                          >
+                            <div className="font-bold">{preset.name}</div>
+                            <div className="text-xs opacity-80">{preset.description}</div>
+                          </button>
+                        ))}
+                      </div>
+                      
+                      {/* Custom Size Input */}
+                      <div className="mt-3">
+                        <label className="text-xs text-text-muted mb-1 block">カスタムサイズ (MB)</label>
+                        <input
+                          type="number"
+                          value={targetSizeMb}
+                          onChange={(e) => setTargetSizeMb(Math.max(1, parseInt(e.target.value) || 1))}
+                          disabled={isProcessing}
+                          className="w-full px-3 py-2 rounded-lg bg-dark-bg border border-dark-border text-text-primary
+                                     focus:border-orange-500 focus:outline-none transition-colors"
+                          min="1"
+                        />
+                      </div>
+
+                      {/* Estimated Bitrate */}
+                      {items[0]?.videoInfo && (
+                        <p className="text-xs text-text-muted mt-2">
+                          推定ビットレート: {Math.round(calculateTargetBitrate(targetSizeMb, items[0].videoInfo.duration))}kbps
+                          {' '}(元: {items[0].videoInfo.bitrate ? `${Math.round(items[0].videoInfo.bitrate / 1000)}kbps` : '不明'})
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Downscale Resolution */}
+                    <div className="pt-4 border-t border-dark-border">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-text-secondary text-sm">解像度</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(() => {
+                          const inputVideo = items[0]?.videoInfo;
+                          const availableRes = inputVideo 
+                            ? getAvailableDownscaleResolutions(inputVideo.width, inputVideo.height)
+                            : DOWNSCALE_RESOLUTIONS;
+                          
+                          return availableRes.map((res) => (
+                            <button
+                              key={res.shortName}
+                              onClick={() => setCompressResolution(res)}
+                              disabled={isProcessing}
+                              className={`
+                                py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200
+                                ${compressResolution.shortName === res.shortName
+                                  ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white'
+                                  : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                                }
+                                ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                              `}
+                            >
+                              <div className="font-semibold">{res.shortName}</div>
+                              {res.width > 0 && (
+                                <div className="text-xs opacity-80">{res.width}x{res.height}</div>
+                              )}
+                            </button>
+                          ));
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Output Settings for Compress */}
+                <div className="bg-dark-surface rounded-xl p-6 border border-dark-border">
+                  <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+                    <svg className="w-5 h-5 text-neon-yellow" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                      />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    出力設定
+                  </h2>
+                  <div className="space-y-4">
+                    {/* Hardware Acceleration Toggle */}
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-text-secondary text-sm">ハードウェア高速化</span>
+                        {ffmpegStatus?.videotoolbox_available ? (
+                          <span className="text-xs px-2 py-0.5 rounded bg-neon-yellow/20 text-neon-yellow">
+                            VideoToolbox
+                          </span>
+                        ) : (
+                          <span className="text-xs px-2 py-0.5 rounded bg-dark-bg text-text-muted">
+                            利用不可
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setUseHwAccel(!useHwAccel)}
+                        disabled={!ffmpegStatus?.videotoolbox_available || isProcessing}
+                        className={`
+                          relative w-12 h-6 rounded-full transition-colors duration-200
+                          ${useHwAccel && ffmpegStatus?.videotoolbox_available
+                            ? 'bg-neon-yellow' 
+                            : 'bg-dark-bg'
+                          }
+                          ${(!ffmpegStatus?.videotoolbox_available || isProcessing) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                        `}
+                      >
+                        <div className={`
+                          absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200
+                          ${useHwAccel && ffmpegStatus?.videotoolbox_available ? 'translate-x-7' : 'translate-x-1'}
+                        `} />
+                      </button>
+                    </div>
+
+                    {/* Output Format */}
+                    <div className="py-2 border-t border-dark-border">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-text-secondary text-sm">出力形式</span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {(['mp4', 'mov', 'webm', 'mkv'] as OutputFormat[]).map((format) => (
+                          <button
+                            key={format}
+                            onClick={() => setOutputFormat(format)}
+                            disabled={isProcessing}
+                            className={`
+                              py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200 uppercase
+                              ${outputFormat === format
+                                ? 'bg-green-500 text-white'
+                                : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                              }
+                              ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                            `}
+                          >
+                            {format}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* File Size Info */}
+                    {items[0]?.videoInfo && (
+                      <div className="py-4 border-t border-dark-border">
+                        <div className="bg-dark-bg rounded-lg p-4">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-text-secondary text-sm">元のサイズ</span>
+                            <span className="text-text-primary font-semibold">
+                              {(items[0].videoInfo.file_size / 1024 / 1024).toFixed(1)} MB
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-text-secondary text-sm">目標サイズ</span>
+                            <span className="text-orange-400 font-semibold">{targetSizeMb} MB</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-text-secondary text-sm">予想削減率</span>
+                            <span className="text-success font-semibold">
+                              {Math.max(0, Math.round((1 - targetSizeMb / (items[0].videoInfo.file_size / 1024 / 1024)) * 100))}%
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Batch Progress */}
             <BatchProgress 
               progress={batchProgress}
@@ -882,7 +1109,10 @@ function App() {
                           d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" 
                         />
                       </svg>
-                      {appMode === 'fps' ? 'バッチ変換開始' : 'バッチ高画質化開始'} ({readyFiles.length}ファイル)
+                      {appMode === 'fps' && 'バッチ変換開始'}
+                      {appMode === 'upscale' && 'バッチ高画質化開始'}
+                      {appMode === 'compress' && 'バッチ圧縮開始'}
+                      {' '}({readyFiles.length}ファイル)
                     </button>
                   </>
                 )}

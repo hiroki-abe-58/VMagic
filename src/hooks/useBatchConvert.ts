@@ -1,9 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { BatchItem, BatchItemStatus, BatchProgress } from '../types/video';
-import { getVideoInfo, convertVideo, upscaleVideo, cancelConversion, subscribeToProgress } from '../lib/tauri-commands';
+import { getVideoInfo, convertVideo, upscaleVideo, compressVideo, cancelConversion, subscribeToProgress } from '../lib/tauri-commands';
 
 interface ConversionOptions {
-  mode: 'fps' | 'upscale';
+  mode: 'fps' | 'upscale' | 'compress';
   targetFps: number;
   useHwAccel: boolean;
   useHevc: boolean;
@@ -12,6 +12,10 @@ interface ConversionOptions {
   outputFormat: string;
   upscaleModel: string;
   upscaleScale: number;
+  // Compression options
+  targetSizeMb: number;
+  compressWidth: number | null;
+  compressHeight: number | null;
 }
 
 interface UseBatchConvertReturn {
@@ -33,9 +37,10 @@ function generateId(): string {
 
 function generateOutputPath(
   inputPath: string, 
-  mode: 'fps' | 'upscale',
+  mode: 'fps' | 'upscale' | 'compress',
   targetFps: number, 
   upscaleScale: number,
+  targetSizeMb: number,
   outputFormat: string = 'mp4'
 ): string {
   const lastSlashIndex = inputPath.lastIndexOf('/');
@@ -46,6 +51,8 @@ function generateOutputPath(
   let suffix: string;
   if (mode === 'upscale') {
     suffix = `_${upscaleScale}x`;
+  } else if (mode === 'compress') {
+    suffix = `_${targetSizeMb}MB`;
   } else {
     suffix = `_${targetFps}fps`;
   }
@@ -123,7 +130,7 @@ export function useBatchConvert(): UseBatchConvertReturn {
             ? { 
                 ...i, 
                 videoInfo: info, 
-                outputPath: generateOutputPath(item.inputPath, 'fps', 60, 4, 'mp4'),
+                outputPath: generateOutputPath(item.inputPath, 'fps', 60, 4, 25, 'mp4'),
                 status: 'ready' as BatchItemStatus 
               }
             : i
@@ -155,7 +162,7 @@ export function useBatchConvert(): UseBatchConvertReturn {
   }, []);
 
   const startBatchConversion = useCallback(async (options: ConversionOptions) => {
-    const { mode, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod, outputFormat, upscaleModel, upscaleScale } = options;
+    const { mode, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod, outputFormat, upscaleModel, upscaleScale, targetSizeMb, compressWidth, compressHeight } = options;
     const readyItems = items.filter(item => item.status === 'ready' || item.status === 'pending');
     if (readyItems.length === 0) return;
 
@@ -165,7 +172,7 @@ export function useBatchConvert(): UseBatchConvertReturn {
     // Update output paths
     setItems(prev => prev.map(item => ({
       ...item,
-      outputPath: item.videoInfo ? generateOutputPath(item.inputPath, mode, targetFps, upscaleScale, outputFormat) : item.outputPath,
+      outputPath: item.videoInfo ? generateOutputPath(item.inputPath, mode, targetFps, upscaleScale, targetSizeMb, outputFormat) : item.outputPath,
       status: item.status === 'ready' ? 'pending' : item.status,
     })));
 
@@ -183,7 +190,7 @@ export function useBatchConvert(): UseBatchConvertReturn {
       if (cancelFlagRef.current) break;
 
       const item = readyItems[i];
-      const outputPath = generateOutputPath(item.inputPath, mode, targetFps, upscaleScale, outputFormat);
+      const outputPath = generateOutputPath(item.inputPath, mode, targetFps, upscaleScale, targetSizeMb, outputFormat);
 
       // Update current item status
       setItems(prev => prev.map(it => 
@@ -203,6 +210,8 @@ export function useBatchConvert(): UseBatchConvertReturn {
         let result;
         if (mode === 'upscale') {
           result = await upscaleVideo(item.inputPath, outputPath, upscaleScale, upscaleModel, useHwAccel, useHevc, qualityPreset, outputFormat);
+        } else if (mode === 'compress') {
+          result = await compressVideo(item.inputPath, outputPath, targetSizeMb, compressWidth, compressHeight, useHwAccel, outputFormat);
         } else {
           result = await convertVideo(item.inputPath, outputPath, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod, outputFormat);
         }

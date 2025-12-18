@@ -309,6 +309,106 @@ pub async fn upscale_video(
     }
 }
 
+/// Compress video to target file size
+#[tauri::command]
+pub async fn compress_video(
+    app: AppHandle,
+    input_path: String,
+    output_path: String,
+    target_size_mb: f64,
+    target_width: Option<u32>,
+    target_height: Option<u32>,
+    use_hw_accel: Option<bool>,
+    output_format: Option<String>,
+    state: State<'_, ConversionState>,
+) -> Result<ConversionResult, String> {
+    // Check if already converting
+    {
+        let mut is_converting = state.is_converting.lock().await;
+        if *is_converting {
+            return Err("変換処理が既に実行中です".to_string());
+        }
+        *is_converting = true;
+    }
+
+    // Reset cancel flag
+    state.cancel_flag.store(false, Ordering::SeqCst);
+
+    let cancel_flag = state.cancel_flag.clone();
+    let is_converting = state.is_converting.clone();
+
+    // Get input video info
+    let input_info = ffmpeg::get_video_info(&input_path).await?;
+    let input_duration = input_info.duration;
+    let input_size = input_info.file_size;
+
+    let format = output_format.as_deref().unwrap_or("mp4");
+
+    // Run compression
+    let result = ffmpeg::compress_video(
+        &input_path,
+        &output_path,
+        target_size_mb,
+        target_width,
+        target_height,
+        use_hw_accel.unwrap_or(true),
+        format,
+        cancel_flag,
+        move |progress| {
+            let _ = app.emit("conversion-progress", progress);
+        },
+    )
+    .await;
+
+    // Reset converting flag
+    {
+        let mut converting = is_converting.lock().await;
+        *converting = false;
+    }
+
+    match result {
+        Ok(output_size) => {
+            let output_info = ffmpeg::get_video_info(&output_path).await?;
+            let output_duration = output_info.duration;
+            let duration_diff = (output_duration - input_duration).abs();
+            
+            let compression_ratio = (1.0 - output_size as f64 / input_size as f64) * 100.0;
+
+            let message = format!(
+                "圧縮完了: {:.1}MB -> {:.1}MB ({:.0}%削減)",
+                input_size as f64 / 1024.0 / 1024.0,
+                output_size as f64 / 1024.0 / 1024.0,
+                compression_ratio
+            );
+
+            Ok(ConversionResult {
+                success: true,
+                output_path,
+                input_duration,
+                output_duration,
+                duration_diff,
+                duration_valid: duration_diff < 0.5,
+                message,
+            })
+        }
+        Err(e) => {
+            if e.contains("cancelled") || e.contains("キャンセル") {
+                Ok(ConversionResult {
+                    success: false,
+                    output_path,
+                    input_duration,
+                    output_duration: 0.0,
+                    duration_diff: 0.0,
+                    duration_valid: false,
+                    message: "圧縮がキャンセルされました".to_string(),
+                })
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
 /// Open directory selection dialog
 /// Note: Currently handled by frontend using @tauri-apps/plugin-dialog
 #[tauri::command]

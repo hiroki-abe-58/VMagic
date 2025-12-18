@@ -1226,3 +1226,210 @@ where
     Ok(())
 }
 
+/// Compress video to target file size
+/// Uses 2-pass encoding for accurate bitrate control
+pub async fn compress_video<F>(
+    input_path: &str,
+    output_path: &str,
+    target_size_mb: f64,
+    target_width: Option<u32>,
+    target_height: Option<u32>,
+    use_hw_accel: bool,
+    output_format: &str,
+    cancel_flag: Arc<AtomicBool>,
+    progress_callback: F,
+) -> Result<u64, String>
+where
+    F: Fn(ProgressEvent) + Send + 'static,
+{
+    log::info!("Starting compression: target size {}MB", target_size_mb);
+
+    // Get input video info
+    let input_info = get_video_info(input_path).await?;
+    let input_duration = input_info.duration;
+
+    // Calculate target bitrate
+    let audio_bitrate_kbps = 128;
+    let target_bits = target_size_mb * 8.0 * 1024.0 * 1024.0;
+    let audio_bits = audio_bitrate_kbps as f64 * 1000.0 * input_duration;
+    let video_bits = (target_bits - audio_bits).max(target_bits * 0.8);
+    let video_bitrate_kbps = (video_bits / input_duration / 1000.0).floor() as u32;
+    let video_bitrate_kbps = video_bitrate_kbps.max(100); // Minimum 100kbps
+
+    log::info!("Calculated video bitrate: {}kbps, audio: {}kbps", video_bitrate_kbps, audio_bitrate_kbps);
+
+    progress_callback(ProgressEvent {
+        progress: 0.0,
+        frame: 0,
+        fps: 0.0,
+        time: "00:00:00.00".to_string(),
+        speed: "圧縮中...".to_string(),
+    });
+
+    // Build scale filter if needed
+    let scale_filter = match (target_width, target_height) {
+        (Some(w), Some(h)) if w > 0 && h > 0 => {
+            // Scale to target size while maintaining aspect ratio
+            format!("scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2", w, h, w, h)
+        }
+        _ => String::new(),
+    };
+
+    // Build ffmpeg arguments
+    let mut args = vec![
+        "-y".to_string(),
+        "-i".to_string(),
+        input_path.to_string(),
+    ];
+
+    // Add scale filter if specified
+    if !scale_filter.is_empty() {
+        args.extend(["-vf".to_string(), scale_filter.clone()]);
+        log::info!("Downscaling to {}x{}", target_width.unwrap_or(0), target_height.unwrap_or(0));
+    }
+
+    // Video codec settings
+    if use_hw_accel {
+        args.extend([
+            "-c:v".to_string(),
+            "h264_videotoolbox".to_string(),
+            "-b:v".to_string(),
+            format!("{}k", video_bitrate_kbps),
+            "-maxrate".to_string(),
+            format!("{}k", (video_bitrate_kbps as f64 * 1.5) as u32),
+            "-bufsize".to_string(),
+            format!("{}k", video_bitrate_kbps * 2),
+        ]);
+        log::info!("Using VideoToolbox hardware encoding");
+    } else {
+        args.extend([
+            "-c:v".to_string(),
+            "libx264".to_string(),
+            "-preset".to_string(),
+            "slow".to_string(), // Better compression
+            "-b:v".to_string(),
+            format!("{}k", video_bitrate_kbps),
+            "-maxrate".to_string(),
+            format!("{}k", (video_bitrate_kbps as f64 * 1.5) as u32),
+            "-bufsize".to_string(),
+            format!("{}k", video_bitrate_kbps * 2),
+        ]);
+        log::info!("Using software H.264 encoding");
+    }
+
+    // Audio settings
+    args.extend([
+        "-c:a".to_string(),
+        "aac".to_string(),
+        "-b:a".to_string(),
+        format!("{}k", audio_bitrate_kbps),
+    ]);
+
+    // Output format
+    match output_format {
+        "webm" => {
+            // Override codec for webm
+            args = vec![
+                "-y".to_string(),
+                "-i".to_string(),
+                input_path.to_string(),
+            ];
+            if !scale_filter.is_empty() {
+                args.extend(["-vf".to_string(), scale_filter.clone()]);
+            }
+            args.extend([
+                "-c:v".to_string(),
+                "libvpx-vp9".to_string(),
+                "-b:v".to_string(),
+                format!("{}k", video_bitrate_kbps),
+                "-c:a".to_string(),
+                "libopus".to_string(),
+                "-b:a".to_string(),
+                format!("{}k", audio_bitrate_kbps),
+            ]);
+        }
+        "mov" => {
+            args.extend(["-f".to_string(), "mov".to_string()]);
+        }
+        "mkv" => {
+            args.extend(["-f".to_string(), "matroska".to_string()]);
+        }
+        _ => {
+            args.extend(["-movflags".to_string(), "+faststart".to_string()]);
+        }
+    }
+
+    // Progress output
+    args.extend([
+        "-progress".to_string(),
+        "pipe:1".to_string(),
+        "-nostats".to_string(),
+    ]);
+
+    args.push(output_path.to_string());
+
+    // Run ffmpeg
+    let mut child = Command::new("ffmpeg")
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("ffmpeg起動エラー: {}", e))?;
+
+    let stdout = child.stdout.take()
+        .ok_or("stdoutの取得に失敗しました")?;
+
+    let mut reader = BufReader::new(stdout).lines();
+
+    let time_regex = Regex::new(r"out_time_ms=(\d+)").unwrap();
+
+    while let Ok(Some(line)) = reader.next_line().await {
+        if cancel_flag.load(Ordering::SeqCst) {
+            let _ = child.kill().await;
+            return Err("変換がキャンセルされました".to_string());
+        }
+
+        if let Some(caps) = time_regex.captures(&line) {
+            if let Some(time_ms) = caps.get(1) {
+                if let Ok(ms) = time_ms.as_str().parse::<u64>() {
+                    let current_time = ms as f64 / 1_000_000.0;
+                    let progress = (current_time / input_duration * 100.0).min(99.0);
+
+                    progress_callback(ProgressEvent {
+                        progress,
+                        frame: 0,
+                        fps: 0.0,
+                        time: format_time(current_time),
+                        speed: "圧縮中...".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    let status = child.wait().await
+        .map_err(|e| format!("ffmpeg待機エラー: {}", e))?;
+
+    if !status.success() {
+        return Err("圧縮に失敗しました".to_string());
+    }
+
+    // Get actual output file size
+    let output_size = tokio::fs::metadata(output_path).await
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    progress_callback(ProgressEvent {
+        progress: 100.0,
+        frame: 0,
+        fps: 0.0,
+        time: format_time(input_duration),
+        speed: "完了".to_string(),
+    });
+
+    log::info!("Compression complete: {} -> {} ({}MB)", 
+        input_path, output_path, output_size as f64 / 1024.0 / 1024.0);
+
+    Ok(output_size)
+}
+

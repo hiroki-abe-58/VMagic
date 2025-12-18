@@ -25,6 +25,7 @@ pub fn run() {
             get_video_info,
             convert_video,
             upscale_video,
+            compress_video,
             cancel_conversion,
             select_output_directory,
         ])

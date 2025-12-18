@@ -64,6 +64,27 @@ export async function upscaleVideo(
   });
 }
 
+// Compress video to target file size
+export async function compressVideo(
+  inputPath: string,
+  outputPath: string,
+  targetSizeMb: number,
+  targetWidth: number | null = null,
+  targetHeight: number | null = null,
+  useHwAccel: boolean = true,
+  outputFormat: string = 'mp4'
+): Promise<ConversionResult> {
+  return invoke<ConversionResult>('compress_video', {
+    inputPath,
+    outputPath,
+    targetSizeMb,
+    targetWidth,
+    targetHeight,
+    useHwAccel,
+    outputFormat,
+  });
+}
+
 // Subscribe to conversion progress events
 export async function subscribeToProgress(
     callback: (event: ProgressEvent) => void
