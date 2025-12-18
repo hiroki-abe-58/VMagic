@@ -85,21 +85,21 @@ export function calculateScaleFactor(
 
 // Get available target resolutions based on input size
 export function getAvailableResolutions(
-  inputWidth: number,
-  inputHeight: number
+    inputWidth: number,
+    inputHeight: number
 ): (TargetResolution & { scale: UpscaleScale; outputWidth: number; outputHeight: number })[] {
-  return TARGET_RESOLUTIONS
-    .map(res => {
-      const scale = calculateScaleFactor(inputWidth, inputHeight, res.width, res.height);
-      if (!scale) return null;
-      return {
-        ...res,
-        scale,
-        outputWidth: inputWidth * scale,
-        outputHeight: inputHeight * scale,
-      };
-    })
-    .filter((res): res is NonNullable<typeof res> => res !== null);
+    return TARGET_RESOLUTIONS
+        .map(res => {
+            const scale = calculateScaleFactor(inputWidth, inputHeight, res.width, res.height);
+            if (!scale) return null;
+            return {
+                ...res,
+                scale,
+                outputWidth: inputWidth * scale,
+                outputHeight: inputHeight * scale,
+            };
+        })
+        .filter((res): res is NonNullable<typeof res> => res !== null);
 }
 
 // ============================================
@@ -108,72 +108,72 @@ export function getAvailableResolutions(
 
 // Target file size presets (in MB)
 export interface FileSizePreset {
-  name: string;
-  sizeMB: number;
-  description: string;
+    name: string;
+    sizeMB: number;
+    description: string;
 }
 
 export const FILE_SIZE_PRESETS: FileSizePreset[] = [
-  { name: '8MB', sizeMB: 8, description: 'Discord無料' },
-  { name: '25MB', sizeMB: 25, description: 'Discord Nitro / メール添付' },
-  { name: '50MB', sizeMB: 50, description: 'Discord Nitro Basic' },
-  { name: '100MB', sizeMB: 100, description: '一般的なアップロード' },
-  { name: '500MB', sizeMB: 500, description: '大容量' },
+    { name: '8MB', sizeMB: 8, description: 'Discord無料' },
+    { name: '25MB', sizeMB: 25, description: 'Discord Nitro / メール添付' },
+    { name: '50MB', sizeMB: 50, description: 'Discord Nitro Basic' },
+    { name: '100MB', sizeMB: 100, description: '一般的なアップロード' },
+    { name: '500MB', sizeMB: 500, description: '大容量' },
 ];
 
 // Downscale resolution presets
 export interface DownscaleResolution {
-  name: string;
-  width: number;
-  height: number;
-  shortName: string;
+    name: string;
+    width: number;
+    height: number;
+    shortName: string;
 }
 
 export const DOWNSCALE_RESOLUTIONS: DownscaleResolution[] = [
-  { name: '元のサイズ', width: 0, height: 0, shortName: 'Original' },
-  { name: '4K UHD', width: 3840, height: 2160, shortName: '4K' },
-  { name: 'Full HD (1080p)', width: 1920, height: 1080, shortName: 'FHD' },
-  { name: 'HD (720p)', width: 1280, height: 720, shortName: '720p' },
-  { name: 'SD (480p)', width: 854, height: 480, shortName: '480p' },
-  { name: '360p', width: 640, height: 360, shortName: '360p' },
+    { name: '元のサイズ', width: 0, height: 0, shortName: 'Original' },
+    { name: '4K UHD', width: 3840, height: 2160, shortName: '4K' },
+    { name: 'Full HD (1080p)', width: 1920, height: 1080, shortName: 'FHD' },
+    { name: 'HD (720p)', width: 1280, height: 720, shortName: '720p' },
+    { name: 'SD (480p)', width: 854, height: 480, shortName: '480p' },
+    { name: '360p', width: 640, height: 360, shortName: '360p' },
 ];
 
 // Get available downscale resolutions (only smaller than input)
 export function getAvailableDownscaleResolutions(
-  inputWidth: number,
-  inputHeight: number
+    inputWidth: number,
+    inputHeight: number
 ): DownscaleResolution[] {
-  return DOWNSCALE_RESOLUTIONS.filter(res => {
-    if (res.width === 0) return true; // Always include "Original"
-    return res.width < inputWidth || res.height < inputHeight;
-  });
+    return DOWNSCALE_RESOLUTIONS.filter(res => {
+        if (res.width === 0) return true; // Always include "Original"
+        return res.width < inputWidth || res.height < inputHeight;
+    });
 }
 
 // Calculate target bitrate for desired file size
 export function calculateTargetBitrate(
-  targetSizeMB: number,
-  durationSeconds: number,
-  audioBitrateKbps: number = 128
+    targetSizeMB: number,
+    durationSeconds: number,
+    audioBitrateKbps: number = 128
 ): number {
-  // Target size in bits
-  const targetBits = targetSizeMB * 8 * 1024 * 1024;
-  // Audio bits
-  const audioBits = audioBitrateKbps * 1000 * durationSeconds;
-  // Video bits (target - audio)
-  const videoBits = Math.max(targetBits - audioBits, targetBits * 0.8);
-  // Video bitrate in kbps
-  const videoBitrateKbps = Math.floor(videoBits / durationSeconds / 1000);
-  return Math.max(videoBitrateKbps, 100); // Minimum 100kbps
+    // Target size in bits
+    const targetBits = targetSizeMB * 8 * 1024 * 1024;
+    // Audio bits
+    const audioBits = audioBitrateKbps * 1000 * durationSeconds;
+    // Video bits (target - audio)
+    const videoBits = Math.max(targetBits - audioBits, targetBits * 0.8);
+    // Video bitrate in kbps
+    const videoBitrateKbps = Math.floor(videoBits / durationSeconds / 1000);
+    return Math.max(videoBitrateKbps, 100); // Minimum 100kbps
 }
 
 // Estimate output file size
 export function estimateFileSize(
-  videoBitrateKbps: number,
-  audioBitrateKbps: number,
-  durationSeconds: number
+    videoBitrateKbps: number,
+    audioBitrateKbps: number,
+    durationSeconds: number
 ): number {
-  const totalBits = (videoBitrateKbps + audioBitrateKbps) * 1000 * durationSeconds;
-  return totalBits / 8 / 1024 / 1024; // Return in MB
+    const totalBits = (videoBitrateKbps + audioBitrateKbps) * 1000 * durationSeconds;
+    return totalBits / 8 / 1024 / 1024; // Return in MB
 }
 
 // Conversion progress event
