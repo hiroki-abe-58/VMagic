@@ -47,6 +47,8 @@ function App() {
           version: null, 
           videotoolbox_available: false,
           hevc_available: false,
+          rife_available: false,
+          rife_path: null,
         });
       }
     };
@@ -109,6 +111,16 @@ function App() {
 
           {/* FFmpeg Status */}
           <div className="flex items-center gap-4">
+            {ffmpegStatus?.rife_available && (
+              <div className="flex items-center gap-2 text-purple-400 text-sm">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                    d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" 
+                  />
+                </svg>
+                <span>RIFE</span>
+              </div>
+            )}
             {ffmpegStatus?.videotoolbox_available && (
               <div className="flex items-center gap-2 text-neon-yellow text-sm">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -271,32 +283,83 @@ function App() {
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-text-secondary text-sm">フレーム補間方式</span>
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {(['minterpolate', 'framerate', 'duplicate'] as InterpolationMethod[]).map((method) => (
-                          <button
-                            key={method}
-                            onClick={() => setInterpolationMethod(method)}
-                            disabled={isProcessing}
-                            className={`
-                              py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200
-                              ${interpolationMethod === method
-                                ? 'bg-purple-500 text-white'
-                                : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
-                              }
-                              ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-                            `}
-                          >
-                            {method === 'minterpolate' && '高品質'}
-                            {method === 'framerate' && 'バランス'}
-                            {method === 'duplicate' && '高速'}
-                          </button>
-                        ))}
+                      <div className="grid grid-cols-2 gap-2">
+                        {/* RIFE AI option - highlighted if available */}
+                        <button
+                          onClick={() => setInterpolationMethod('rife')}
+                          disabled={!ffmpegStatus?.rife_available || isProcessing}
+                          className={`
+                            py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200
+                            ${interpolationMethod === 'rife'
+                              ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white'
+                              : ffmpegStatus?.rife_available
+                                ? 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light border border-purple-500/30'
+                                : 'bg-dark-bg text-text-muted opacity-50 cursor-not-allowed'
+                            }
+                            ${(!ffmpegStatus?.rife_available || isProcessing) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                          `}
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                            </svg>
+                            AI (RIFE)
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => setInterpolationMethod('minterpolate')}
+                          disabled={isProcessing}
+                          className={`
+                            py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200
+                            ${interpolationMethod === 'minterpolate'
+                              ? 'bg-purple-500 text-white'
+                              : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                            }
+                            ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                          `}
+                        >
+                          高品質
+                        </button>
+                        <button
+                          onClick={() => setInterpolationMethod('framerate')}
+                          disabled={isProcessing}
+                          className={`
+                            py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200
+                            ${interpolationMethod === 'framerate'
+                              ? 'bg-purple-500 text-white'
+                              : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                            }
+                            ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                          `}
+                        >
+                          バランス
+                        </button>
+                        <button
+                          onClick={() => setInterpolationMethod('duplicate')}
+                          disabled={isProcessing}
+                          className={`
+                            py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200
+                            ${interpolationMethod === 'duplicate'
+                              ? 'bg-purple-500 text-white'
+                              : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                            }
+                            ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                          `}
+                        >
+                          高速
+                        </button>
                       </div>
                       <p className="text-xs text-text-muted mt-2">
-                        {interpolationMethod === 'minterpolate' && 'モーション補間: 最高品質だが処理が遅い (CPU集約)'}
+                        {interpolationMethod === 'rife' && 'AI補間: 最高品質、GPU高速処理 (要RIFEインストール)'}
+                        {interpolationMethod === 'minterpolate' && 'モーション補間: 高品質だが処理が遅い (CPU集約)'}
                         {interpolationMethod === 'framerate' && 'フレームブレンド: 品質と速度のバランス'}
                         {interpolationMethod === 'duplicate' && 'フレーム複製: 最速だが品質は低い'}
                       </p>
+                      {!ffmpegStatus?.rife_available && (
+                        <p className="text-xs text-orange-400 mt-1">
+                          RIFE未検出: AI補間を使用するにはrife-ncnn-vulkanをインストールしてください
+                        </p>
+                      )}
                     </div>
 
                     {/* Quality Preset */}

@@ -29,6 +29,8 @@ pub struct FFmpegStatus {
     pub version: Option<String>,
     pub videotoolbox_available: bool,
     pub hevc_available: bool,
+    pub rife_available: bool,
+    pub rife_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -103,22 +105,44 @@ pub async fn convert_video(
         output_path.clone()
     };
 
-    // Run conversion
-    let result = ffmpeg::convert_video_minterpolate(
-        &input_path,
-        &final_output_path,
-        target_fps,
-        input_duration,
-        use_hw_accel.unwrap_or(true),
-        use_hevc.unwrap_or(false),
-        quality_preset.as_deref(),
-        interpolation_method.as_deref(),
-        cancel_flag,
-        move |progress| {
-            let _ = app.emit("conversion-progress", progress);
-        },
-    )
-    .await;
+    // Run conversion based on interpolation method
+    let method = interpolation_method.as_deref().unwrap_or("minterpolate");
+    
+    let result = if method == "rife" {
+        // Use RIFE AI interpolation
+        ffmpeg::convert_video_rife(
+            &input_path,
+            &final_output_path,
+            target_fps,
+            input_info.fps,
+            input_duration,
+            use_hw_accel.unwrap_or(true),
+            use_hevc.unwrap_or(false),
+            quality_preset.as_deref(),
+            cancel_flag,
+            move |progress| {
+                let _ = app.emit("conversion-progress", progress);
+            },
+        )
+        .await
+    } else {
+        // Use ffmpeg filters
+        ffmpeg::convert_video_minterpolate(
+            &input_path,
+            &final_output_path,
+            target_fps,
+            input_duration,
+            use_hw_accel.unwrap_or(true),
+            use_hevc.unwrap_or(false),
+            quality_preset.as_deref(),
+            interpolation_method.as_deref(),
+            cancel_flag,
+            move |progress| {
+                let _ = app.emit("conversion-progress", progress);
+            },
+        )
+        .await
+    };
 
     // Reset converting flag
     {

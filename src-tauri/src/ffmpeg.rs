@@ -71,6 +71,20 @@ pub async fn check_ffmpeg_availability() -> Result<FFmpegStatus, String> {
         (false, false)
     };
 
+    // Check RIFE availability
+    let rife_result = Command::new("which")
+        .arg("rife-ncnn-vulkan")
+        .output()
+        .await;
+    
+    let rife_path = rife_result
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let rife_available = rife_path.is_some();
+
     let available = ffmpeg_path.is_some() && ffprobe_path.is_some();
 
     Ok(FFmpegStatus {
@@ -80,6 +94,8 @@ pub async fn check_ffmpeg_availability() -> Result<FFmpegStatus, String> {
         version,
         videotoolbox_available,
         hevc_available,
+        rife_available,
+        rife_path,
     })
 }
 
@@ -525,5 +541,259 @@ fn format_time(seconds: f64) -> String {
     let minutes = ((seconds % 3600.0) / 60.0).floor() as u32;
     let secs = seconds % 60.0;
     format!("{:02}:{:02}:{:05.2}", hours, minutes, secs)
+}
+
+/// Convert video using RIFE AI frame interpolation
+/// Process: Extract frames -> RIFE interpolation -> Encode with ffmpeg
+pub async fn convert_video_rife<F>(
+    input_path: &str,
+    output_path: &str,
+    target_fps: f64,
+    input_fps: f64,
+    input_duration: f64,
+    use_hw_accel: bool,
+    use_hevc: bool,
+    quality_preset: Option<&str>,
+    cancel_flag: Arc<AtomicBool>,
+    progress_callback: F,
+) -> Result<f64, String>
+where
+    F: Fn(ProgressEvent) + Send + 'static,
+{
+    use tokio::fs;
+
+    log::info!("Starting RIFE conversion: {} fps -> {} fps", input_fps, target_fps);
+
+    // Calculate interpolation multiplier (must be power of 2 for RIFE)
+    let multiplier = (target_fps / input_fps).ceil() as u32;
+    let rife_multiplier = multiplier.next_power_of_two().max(2);
+    let actual_target_fps = input_fps * rife_multiplier as f64;
+
+    log::info!("RIFE multiplier: {}x (actual output: {} fps)", rife_multiplier, actual_target_fps);
+
+    // Create temporary directories
+    let temp_dir = std::env::temp_dir().join(format!("vmagic_rife_{}", std::process::id()));
+    let input_frames_dir = temp_dir.join("input");
+    let output_frames_dir = temp_dir.join("output");
+
+    fs::create_dir_all(&input_frames_dir).await
+        .map_err(|e| format!("一時ディレクトリ作成エラー: {}", e))?;
+    fs::create_dir_all(&output_frames_dir).await
+        .map_err(|e| format!("一時ディレクトリ作成エラー: {}", e))?;
+
+    // Cleanup function
+    let cleanup = || async {
+        let _ = fs::remove_dir_all(&temp_dir).await;
+    };
+
+    // Phase 1: Extract frames from input video (30% of progress)
+    log::info!("Phase 1: Extracting frames...");
+    progress_callback(ProgressEvent {
+        progress: 0.0,
+        frame: 0,
+        fps: 0.0,
+        time: "00:00:00.00".to_string(),
+        speed: "フレーム抽出中...".to_string(),
+    });
+
+    let extract_status = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-i", input_path,
+            "-qscale:v", "2",
+            &format!("{}/frame_%08d.png", input_frames_dir.display()),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map_err(|e| format!("フレーム抽出エラー: {}", e))?;
+
+    if !extract_status.success() {
+        cleanup().await;
+        return Err("フレーム抽出に失敗しました".to_string());
+    }
+
+    if cancel_flag.load(Ordering::SeqCst) {
+        cleanup().await;
+        return Err("変換がキャンセルされました".to_string());
+    }
+
+    progress_callback(ProgressEvent {
+        progress: 30.0,
+        frame: 0,
+        fps: 0.0,
+        time: "00:00:00.00".to_string(),
+        speed: "RIFE補間中...".to_string(),
+    });
+
+    // Phase 2: Run RIFE interpolation (50% of progress)
+    log::info!("Phase 2: Running RIFE interpolation ({}x)...", rife_multiplier);
+
+    let rife_status = Command::new("rife-ncnn-vulkan")
+        .args([
+            "-i", &input_frames_dir.to_string_lossy(),
+            "-o", &output_frames_dir.to_string_lossy(),
+            "-m", "rife-v4.6",
+            "-n", &rife_multiplier.to_string(),
+            "-f", "frame_%08d.png",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map_err(|e| format!("RIFE実行エラー: {}", e))?;
+
+    if !rife_status.success() {
+        cleanup().await;
+        return Err("RIFEフレーム補間に失敗しました".to_string());
+    }
+
+    if cancel_flag.load(Ordering::SeqCst) {
+        cleanup().await;
+        return Err("変換がキャンセルされました".to_string());
+    }
+
+    progress_callback(ProgressEvent {
+        progress: 80.0,
+        frame: 0,
+        fps: 0.0,
+        time: "00:00:00.00".to_string(),
+        speed: "エンコード中...".to_string(),
+    });
+
+    // Phase 3: Encode interpolated frames to video (20% of progress)
+    log::info!("Phase 3: Encoding to video...");
+
+    // Extract audio from original video
+    let audio_path = temp_dir.join("audio.aac");
+    let _ = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-i", input_path,
+            "-vn",
+            "-acodec", "copy",
+            &audio_path.to_string_lossy(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await;
+
+    let has_audio = audio_path.exists();
+
+    // Build encoding arguments
+    let mut encode_args = vec![
+        "-y".to_string(),
+        "-framerate".to_string(),
+        actual_target_fps.to_string(),
+        "-i".to_string(),
+        format!("{}/frame_%08d.png", output_frames_dir.display()),
+    ];
+
+    if has_audio {
+        encode_args.extend([
+            "-i".to_string(),
+            audio_path.to_string_lossy().to_string(),
+        ]);
+    }
+
+    // Determine quality
+    let quality = match quality_preset {
+        Some("fast") => 50,
+        Some("balanced") => 65,
+        Some("quality") => 80,
+        _ => 65,
+    };
+
+    // Add video codec settings
+    if use_hw_accel {
+        if use_hevc {
+            encode_args.extend([
+                "-c:v".to_string(),
+                "hevc_videotoolbox".to_string(),
+                "-q:v".to_string(),
+                quality.to_string(),
+                "-tag:v".to_string(),
+                "hvc1".to_string(),
+            ]);
+        } else {
+            encode_args.extend([
+                "-c:v".to_string(),
+                "h264_videotoolbox".to_string(),
+                "-q:v".to_string(),
+                quality.to_string(),
+            ]);
+        }
+    } else {
+        let crf = match quality_preset {
+            Some("fast") => "23",
+            Some("balanced") => "18",
+            Some("quality") => "15",
+            _ => "18",
+        };
+        encode_args.extend([
+            "-c:v".to_string(),
+            "libx264".to_string(),
+            "-preset".to_string(),
+            "medium".to_string(),
+            "-crf".to_string(),
+            crf.to_string(),
+        ]);
+    }
+
+    // Add audio settings
+    if has_audio {
+        encode_args.extend([
+            "-c:a".to_string(),
+            "aac".to_string(),
+            "-b:a".to_string(),
+            "192k".to_string(),
+            "-map".to_string(),
+            "0:v".to_string(),
+            "-map".to_string(),
+            "1:a".to_string(),
+        ]);
+    }
+
+    // If target_fps differs from actual_target_fps, add fps filter to adjust
+    if (target_fps - actual_target_fps).abs() > 0.01 {
+        encode_args.extend([
+            "-filter:v".to_string(),
+            format!("fps={}", target_fps),
+        ]);
+    }
+
+    encode_args.push(output_path.to_string());
+
+    let encode_status = Command::new("ffmpeg")
+        .args(&encode_args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map_err(|e| format!("エンコードエラー: {}", e))?;
+
+    // Cleanup temp files
+    cleanup().await;
+
+    if !encode_status.success() {
+        return Err("動画エンコードに失敗しました".to_string());
+    }
+
+    progress_callback(ProgressEvent {
+        progress: 100.0,
+        frame: 0,
+        fps: 0.0,
+        time: format_time(input_duration),
+        speed: "完了".to_string(),
+    });
+
+    // Get output video duration for validation
+    let output_info = get_video_info(output_path).await?;
+
+    log::info!("RIFE conversion complete: {} -> {}", input_path, output_path);
+
+    Ok(output_info.duration)
 }
 

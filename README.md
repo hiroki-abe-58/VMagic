@@ -79,9 +79,24 @@ npm run tauri:build
 
 ## フレーム補間方式
 
-3つのフレーム補間方式から選択できます：
+4つのフレーム補間方式から選択できます：
 
-### 1. 高品質 (minterpolate)
+### 1. AI補間 (RIFE) - 推奨
+- **品質**: 最高（AIによる自然なフレーム生成）
+- **速度**: 高速（GPU/Vulkan使用）
+- **特徴**: ディープラーニングベースのオプティカルフロー推定
+- **要件**: rife-ncnn-vulkanのインストールが必要
+
+```bash
+# RIFEのインストール方法
+# 1. GitHubからダウンロード
+curl -L -o rife.zip https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-macos.zip
+unzip rife.zip
+# 2. パスを通す（例: /usr/local/bin）
+sudo mv rife-ncnn-vulkan /usr/local/bin/
+```
+
+### 2. 高品質 (minterpolate)
 ```bash
 ffmpeg -i input.mp4 \
   -filter:v "minterpolate=fps={target_fps}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1" \

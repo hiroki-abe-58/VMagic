@@ -20,13 +20,15 @@ export interface FFmpegStatus {
     version: string | null;
     videotoolbox_available: boolean;
     hevc_available: boolean;
+    rife_available: boolean;
+    rife_path: string | null;
 }
 
 // Quality preset options
 export type QualityPreset = 'fast' | 'balanced' | 'quality';
 
 // Interpolation method options
-export type InterpolationMethod = 'minterpolate' | 'framerate' | 'duplicate';
+export type InterpolationMethod = 'minterpolate' | 'framerate' | 'duplicate' | 'rife';
 
 // Conversion progress event
 export interface ProgressEvent {

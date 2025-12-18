@@ -79,9 +79,24 @@ npm run tauri:build
 
 ## Frame Interpolation Methods
 
-Choose from 3 interpolation methods:
+Choose from 4 interpolation methods:
 
-### 1. High Quality (minterpolate)
+### 1. AI Interpolation (RIFE) - Recommended
+- **Quality**: Highest (natural frame generation by AI)
+- **Speed**: Fast (uses GPU/Vulkan)
+- **Features**: Deep learning-based optical flow estimation
+- **Requirements**: rife-ncnn-vulkan must be installed
+
+```bash
+# How to install RIFE
+# 1. Download from GitHub
+curl -L -o rife.zip https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-macos.zip
+unzip rife.zip
+# 2. Add to PATH (e.g., /usr/local/bin)
+sudo mv rife-ncnn-vulkan /usr/local/bin/
+```
+
+### 2. High Quality (minterpolate)
 ```bash
 ffmpeg -i input.mp4 \
   -filter:v "minterpolate=fps={target_fps}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1" \
