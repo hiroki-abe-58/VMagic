@@ -18,7 +18,11 @@ export interface FFmpegStatus {
     ffprobe_path: string | null;
     version: string | null;
     videotoolbox_available: boolean;
+    hevc_available: boolean;
 }
+
+// Quality preset options
+export type QualityPreset = 'fast' | 'balanced' | 'quality';
 
 // Conversion progress event
 export interface ProgressEvent {

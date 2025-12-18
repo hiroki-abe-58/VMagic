@@ -15,17 +15,21 @@ export async function getVideoInfo(path: string): Promise<VideoInfo> {
 
 // Convert video with minterpolate
 export async function convertVideo(
-    inputPath: string,
-    outputPath: string,
-    targetFps: number,
-    useHwAccel: boolean = true
+  inputPath: string,
+  outputPath: string,
+  targetFps: number,
+  useHwAccel: boolean = true,
+  useHevc: boolean = false,
+  qualityPreset: string = 'balanced'
 ): Promise<ConversionResult> {
-    return invoke<ConversionResult>('convert_video', {
-        inputPath,
-        outputPath,
-        targetFps,
-        useHwAccel,
-    });
+  return invoke<ConversionResult>('convert_video', {
+    inputPath,
+    outputPath,
+    targetFps,
+    useHwAccel,
+    useHevc,
+    qualityPreset,
+  });
 }
 
 // Cancel ongoing conversion

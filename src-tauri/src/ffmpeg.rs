@@ -50,8 +50,8 @@ pub async fn check_ffmpeg_availability() -> Result<FFmpegStatus, String> {
         None
     };
 
-    // Check VideoToolbox availability
-    let videotoolbox_available = if ffmpeg_path.is_some() {
+    // Check VideoToolbox availability (H.264 and HEVC)
+    let (videotoolbox_available, hevc_available) = if ffmpeg_path.is_some() {
         let encoders_output = Command::new("ffmpeg")
             .args(["-hide_banner", "-encoders"])
             .output()
@@ -60,11 +60,14 @@ pub async fn check_ffmpeg_availability() -> Result<FFmpegStatus, String> {
             .ok()
             .map(|o| {
                 let output = String::from_utf8_lossy(&o.stdout);
-                output.contains("h264_videotoolbox")
+                (
+                    output.contains("h264_videotoolbox"),
+                    output.contains("hevc_videotoolbox"),
+                )
             })
-            .unwrap_or(false)
+            .unwrap_or((false, false))
     } else {
-        false
+        (false, false)
     };
 
     let available = ffmpeg_path.is_some() && ffprobe_path.is_some();
@@ -75,6 +78,7 @@ pub async fn check_ffmpeg_availability() -> Result<FFmpegStatus, String> {
         ffprobe_path,
         version,
         videotoolbox_available,
+        hevc_available,
     })
 }
 
@@ -197,13 +201,16 @@ pub async fn convert_video_minterpolate<F>(
     target_fps: f64,
     input_duration: f64,
     use_hw_accel: bool,
+    use_hevc: bool,
+    quality_preset: Option<&str>,
     cancel_flag: Arc<AtomicBool>,
     progress_callback: F,
 ) -> Result<f64, String>
 where
     F: Fn(ProgressEvent) + Send + 'static,
 {
-    // Build minterpolate filter string
+    // Build minterpolate filter string with thread optimization
+    // minterpolate is CPU-intensive, use all available threads
     let filter = format!(
         "minterpolate=fps={}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1",
         target_fps
@@ -212,35 +219,93 @@ where
     // Build ffmpeg arguments
     let mut args = vec![
         "-y".to_string(), // Overwrite output
-        "-i".to_string(),
-        input_path.to_string(),
-        "-filter:v".to_string(),
-        filter,
+        // Multi-threading optimization for Apple Silicon
+        "-threads".to_string(),
+        "0".to_string(), // Auto-detect optimal thread count
     ];
+
+    // Add input
+    args.extend(["-i".to_string(), input_path.to_string()]);
+
+    // Add filter
+    args.extend(["-filter:v".to_string(), filter]);
+
+    // Add filter thread count
+    args.extend(["-filter_threads".to_string(), "0".to_string()]);
+
+    // Determine quality value based on preset
+    let quality = match quality_preset {
+        Some("fast") => 50,      // Lower quality, faster
+        Some("balanced") => 65,  // Balanced
+        Some("quality") => 80,   // Higher quality, slower
+        _ => 65,                  // Default balanced
+    };
 
     // Add video codec settings
     if use_hw_accel {
-        // Use VideoToolbox hardware encoder (Apple Silicon)
-        args.extend([
-            "-c:v".to_string(),
-            "h264_videotoolbox".to_string(),
-            "-q:v".to_string(),
-            "65".to_string(), // Quality (0-100, higher is better, 65 is high quality)
-            "-allow_sw".to_string(),
-            "1".to_string(), // Allow software fallback
-        ]);
-        log::info!("Using VideoToolbox hardware encoding");
+        if use_hevc {
+            // Use HEVC VideoToolbox hardware encoder (more efficient compression)
+            args.extend([
+                "-c:v".to_string(),
+                "hevc_videotoolbox".to_string(),
+                "-q:v".to_string(),
+                quality.to_string(),
+                "-tag:v".to_string(),
+                "hvc1".to_string(), // Better compatibility with Apple devices
+                "-allow_sw".to_string(),
+                "1".to_string(),
+            ]);
+            log::info!("Using VideoToolbox HEVC hardware encoding (quality: {})", quality);
+        } else {
+            // Use H.264 VideoToolbox hardware encoder
+            args.extend([
+                "-c:v".to_string(),
+                "h264_videotoolbox".to_string(),
+                "-q:v".to_string(),
+                quality.to_string(),
+                "-allow_sw".to_string(),
+                "1".to_string(),
+            ]);
+            log::info!("Using VideoToolbox H.264 hardware encoding (quality: {})", quality);
+        }
     } else {
-        // Use software encoder with good settings
-        args.extend([
-            "-c:v".to_string(),
-            "libx264".to_string(),
-            "-preset".to_string(),
-            "medium".to_string(),
-            "-crf".to_string(),
-            "18".to_string(),
-        ]);
-        log::info!("Using software encoding (libx264)");
+        if use_hevc {
+            // Software HEVC encoding
+            let crf = match quality_preset {
+                Some("fast") => "28",
+                Some("balanced") => "23",
+                Some("quality") => "18",
+                _ => "23",
+            };
+            args.extend([
+                "-c:v".to_string(),
+                "libx265".to_string(),
+                "-preset".to_string(),
+                "medium".to_string(),
+                "-crf".to_string(),
+                crf.to_string(),
+                "-tag:v".to_string(),
+                "hvc1".to_string(),
+            ]);
+            log::info!("Using software HEVC encoding (crf: {})", crf);
+        } else {
+            // Software H.264 encoding
+            let crf = match quality_preset {
+                Some("fast") => "23",
+                Some("balanced") => "18",
+                Some("quality") => "15",
+                _ => "18",
+            };
+            args.extend([
+                "-c:v".to_string(),
+                "libx264".to_string(),
+                "-preset".to_string(),
+                "medium".to_string(),
+                "-crf".to_string(),
+                crf.to_string(),
+            ]);
+            log::info!("Using software H.264 encoding (crf: {})", crf);
+        }
     }
 
     // Add audio and progress settings

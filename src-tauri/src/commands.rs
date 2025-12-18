@@ -28,6 +28,7 @@ pub struct FFmpegStatus {
     pub ffprobe_path: Option<String>,
     pub version: Option<String>,
     pub videotoolbox_available: bool,
+    pub hevc_available: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -70,6 +71,8 @@ pub async fn convert_video(
     output_path: String,
     target_fps: f64,
     use_hw_accel: Option<bool>,
+    use_hevc: Option<bool>,
+    quality_preset: Option<String>,
     state: State<'_, ConversionState>,
 ) -> Result<ConversionResult, String> {
     // Check if already converting
@@ -91,13 +94,23 @@ pub async fn convert_video(
     let input_info = ffmpeg::get_video_info(&input_path).await?;
     let input_duration = input_info.duration;
 
+    // Determine output path with correct extension
+    let final_output_path = if use_hevc.unwrap_or(false) && output_path.ends_with(".mp4") {
+        // HEVC can use .mp4 container, but let's keep it
+        output_path.clone()
+    } else {
+        output_path.clone()
+    };
+
     // Run conversion
     let result = ffmpeg::convert_video_minterpolate(
         &input_path,
-        &output_path,
+        &final_output_path,
         target_fps,
         input_duration,
         use_hw_accel.unwrap_or(true),
+        use_hevc.unwrap_or(false),
+        quality_preset.as_deref(),
         cancel_flag,
         move |progress| {
             let _ = app.emit("conversion-progress", progress);

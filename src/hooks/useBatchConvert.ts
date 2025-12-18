@@ -2,6 +2,13 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import type { BatchItem, BatchItemStatus, BatchProgress } from '../types/video';
 import { getVideoInfo, convertVideo, cancelConversion, subscribeToProgress } from '../lib/tauri-commands';
 
+interface ConversionOptions {
+  targetFps: number;
+  useHwAccel: boolean;
+  useHevc: boolean;
+  qualityPreset: string;
+}
+
 interface UseBatchConvertReturn {
   items: BatchItem[];
   batchProgress: BatchProgress | null;
@@ -10,7 +17,7 @@ interface UseBatchConvertReturn {
   removeFile: (id: string) => void;
   clearFiles: () => void;
   updateOutputPath: (id: string, outputPath: string) => void;
-  startBatchConversion: (targetFps: number, useHwAccel: boolean) => Promise<void>;
+  startBatchConversion: (options: ConversionOptions) => Promise<void>;
   cancelBatchConversion: () => Promise<void>;
   reset: () => void;
 }
@@ -128,7 +135,8 @@ export function useBatchConvert(): UseBatchConvertReturn {
     ));
   }, []);
 
-  const startBatchConversion = useCallback(async (targetFps: number, useHwAccel: boolean) => {
+  const startBatchConversion = useCallback(async (options: ConversionOptions) => {
+    const { targetFps, useHwAccel, useHevc, qualityPreset } = options;
     const readyItems = items.filter(item => item.status === 'ready' || item.status === 'pending');
     if (readyItems.length === 0) return;
 
@@ -173,7 +181,7 @@ export function useBatchConvert(): UseBatchConvertReturn {
       } : null);
 
       try {
-        const result = await convertVideo(item.inputPath, outputPath, targetFps, useHwAccel);
+        const result = await convertVideo(item.inputPath, outputPath, targetFps, useHwAccel, useHevc, qualityPreset);
         
         if (result.success) {
           completedCount++;

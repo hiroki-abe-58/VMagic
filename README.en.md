@@ -152,11 +152,24 @@ Macs with Apple Silicon (M1/M2/M3) support hardware encoding via VideoToolbox.
 - Reduced battery consumption
 - Maintains high quality output
 
+### HEVC (H.265) Output
+- 30-50% better compression than H.264
+- Higher quality at same file size
+- Excellent compatibility with Apple devices
+
+### Quality Presets
+- **Fast**: Speed priority. May result in larger file sizes
+- **Balanced**: Balanced speed and quality (default)
+- **Quality**: Highest quality. Takes more processing time
+
+### Optimization Details
+- Multi-threading optimization: Utilizes all 10 cores on M1 Max
+- Filter threading: Parallel minterpolate processing
+- Automatic fallback to software encoding when VideoToolbox is unavailable
+
 ### Notes
-- Frame interpolation (minterpolate) runs on CPU
+- Frame interpolation (minterpolate) runs on CPU (cannot be GPU-accelerated)
 - VideoToolbox accelerates only the encoding (output) stage
-- Toggle on/off in settings panel
-- Automatically falls back to software encoding (libx264) when VideoToolbox is unavailable
 
 ## Troubleshooting
 
