@@ -290,6 +290,7 @@ pub async fn convert_video_minterpolate<F>(
     use_hevc: bool,
     quality_preset: Option<&str>,
     interpolation_method: Option<&str>,
+    output_format: &str,
     cancel_flag: Arc<AtomicBool>,
     progress_callback: F,
 ) -> Result<f64, String>
@@ -350,79 +351,105 @@ where
         _ => 65,                  // Default balanced
     };
 
-    // Add video codec settings
-    if use_hw_accel {
-        if use_hevc {
-            // Use HEVC VideoToolbox hardware encoder (more efficient compression)
+    // Add video codec settings based on output format
+    match output_format {
+        "webm" => {
+            // WebM uses VP9
+            let crf = match quality_preset {
+                Some("fast") => "35",
+                Some("balanced") => "30",
+                Some("quality") => "25",
+                _ => "30",
+            };
             args.extend([
                 "-c:v".to_string(),
-                "hevc_videotoolbox".to_string(),
-                "-q:v".to_string(),
-                quality.to_string(),
-                "-tag:v".to_string(),
-                "hvc1".to_string(), // Better compatibility with Apple devices
-                "-allow_sw".to_string(),
-                "1".to_string(),
+                "libvpx-vp9".to_string(),
+                "-crf".to_string(),
+                crf.to_string(),
+                "-b:v".to_string(),
+                "0".to_string(),
             ]);
-            log::info!("Using VideoToolbox HEVC hardware encoding (quality: {})", quality);
-        } else {
-            // Use H.264 VideoToolbox hardware encoder
-            args.extend([
-                "-c:v".to_string(),
-                "h264_videotoolbox".to_string(),
-                "-q:v".to_string(),
-                quality.to_string(),
-                "-allow_sw".to_string(),
-                "1".to_string(),
-            ]);
-            log::info!("Using VideoToolbox H.264 hardware encoding (quality: {})", quality);
+            log::info!("Using VP9 encoding for WebM (crf: {})", crf);
         }
-    } else {
-        if use_hevc {
-            // Software HEVC encoding
-            let crf = match quality_preset {
-                Some("fast") => "28",
-                Some("balanced") => "23",
-                Some("quality") => "18",
-                _ => "23",
-            };
-            args.extend([
-                "-c:v".to_string(),
-                "libx265".to_string(),
-                "-preset".to_string(),
-                "medium".to_string(),
-                "-crf".to_string(),
-                crf.to_string(),
-                "-tag:v".to_string(),
-                "hvc1".to_string(),
-            ]);
-            log::info!("Using software HEVC encoding (crf: {})", crf);
-        } else {
-            // Software H.264 encoding
-            let crf = match quality_preset {
-                Some("fast") => "23",
-                Some("balanced") => "18",
-                Some("quality") => "15",
-                _ => "18",
-            };
-            args.extend([
-                "-c:v".to_string(),
-                "libx264".to_string(),
-                "-preset".to_string(),
-                "medium".to_string(),
-                "-crf".to_string(),
-                crf.to_string(),
-            ]);
-            log::info!("Using software H.264 encoding (crf: {})", crf);
+        _ => {
+            // MP4, MOV, MKV use H.264 or HEVC
+            if use_hw_accel {
+                if use_hevc {
+                    args.extend([
+                        "-c:v".to_string(),
+                        "hevc_videotoolbox".to_string(),
+                        "-q:v".to_string(),
+                        quality.to_string(),
+                        "-tag:v".to_string(),
+                        "hvc1".to_string(),
+                        "-allow_sw".to_string(),
+                        "1".to_string(),
+                    ]);
+                    log::info!("Using VideoToolbox HEVC hardware encoding (quality: {})", quality);
+                } else {
+                    args.extend([
+                        "-c:v".to_string(),
+                        "h264_videotoolbox".to_string(),
+                        "-q:v".to_string(),
+                        quality.to_string(),
+                        "-allow_sw".to_string(),
+                        "1".to_string(),
+                    ]);
+                    log::info!("Using VideoToolbox H.264 hardware encoding (quality: {})", quality);
+                }
+            } else {
+                if use_hevc {
+                    let crf = match quality_preset {
+                        Some("fast") => "28",
+                        Some("balanced") => "23",
+                        Some("quality") => "18",
+                        _ => "23",
+                    };
+                    args.extend([
+                        "-c:v".to_string(),
+                        "libx265".to_string(),
+                        "-preset".to_string(),
+                        "medium".to_string(),
+                        "-crf".to_string(),
+                        crf.to_string(),
+                        "-tag:v".to_string(),
+                        "hvc1".to_string(),
+                    ]);
+                    log::info!("Using software HEVC encoding (crf: {})", crf);
+                } else {
+                    let crf = match quality_preset {
+                        Some("fast") => "23",
+                        Some("balanced") => "18",
+                        Some("quality") => "15",
+                        _ => "18",
+                    };
+                    args.extend([
+                        "-c:v".to_string(),
+                        "libx264".to_string(),
+                        "-preset".to_string(),
+                        "medium".to_string(),
+                        "-crf".to_string(),
+                        crf.to_string(),
+                    ]);
+                    log::info!("Using software H.264 encoding (crf: {})", crf);
+                }
+            }
         }
     }
+
+    // Add audio codec based on output format
+    let audio_codec = match output_format {
+        "webm" => "libopus",
+        "mkv" => "copy",
+        _ => "copy",  // MP4, MOV
+    };
 
     // Add audio and progress settings
     args.extend([
         "-c:a".to_string(),
-        "copy".to_string(), // Copy audio stream
+        audio_codec.to_string(),
         "-progress".to_string(),
-        "pipe:1".to_string(), // Output progress to stdout
+        "pipe:1".to_string(),
         "-nostats".to_string(),
         output_path.to_string(),
     ]);
@@ -554,6 +581,7 @@ pub async fn convert_video_rife<F>(
     use_hw_accel: bool,
     use_hevc: bool,
     quality_preset: Option<&str>,
+    output_format: &str,
     cancel_flag: Arc<AtomicBool>,
     progress_callback: F,
 ) -> Result<f64, String>
@@ -753,47 +781,72 @@ where
         _ => 65,
     };
 
-    // Add video codec settings
-    if use_hw_accel {
-        if use_hevc {
+    // Add video codec settings based on output format
+    match output_format {
+        "webm" => {
+            let crf = match quality_preset {
+                Some("fast") => "35",
+                Some("balanced") => "30",
+                Some("quality") => "25",
+                _ => "30",
+            };
             encode_args.extend([
                 "-c:v".to_string(),
-                "hevc_videotoolbox".to_string(),
-                "-q:v".to_string(),
-                quality.to_string(),
-                "-tag:v".to_string(),
-                "hvc1".to_string(),
+                "libvpx-vp9".to_string(),
+                "-crf".to_string(),
+                crf.to_string(),
+                "-b:v".to_string(),
+                "0".to_string(),
             ]);
-        } else {
-            encode_args.extend([
-                "-c:v".to_string(),
-                "h264_videotoolbox".to_string(),
-                "-q:v".to_string(),
-                quality.to_string(),
-            ]);
+            log::info!("Using VP9 encoding for WebM (crf: {})", crf);
         }
-    } else {
-        let crf = match quality_preset {
-            Some("fast") => "23",
-            Some("balanced") => "18",
-            Some("quality") => "15",
-            _ => "18",
-        };
-        encode_args.extend([
-            "-c:v".to_string(),
-            "libx264".to_string(),
-            "-preset".to_string(),
-            "medium".to_string(),
-            "-crf".to_string(),
-            crf.to_string(),
-        ]);
+        _ => {
+            if use_hw_accel {
+                if use_hevc {
+                    encode_args.extend([
+                        "-c:v".to_string(),
+                        "hevc_videotoolbox".to_string(),
+                        "-q:v".to_string(),
+                        quality.to_string(),
+                        "-tag:v".to_string(),
+                        "hvc1".to_string(),
+                    ]);
+                } else {
+                    encode_args.extend([
+                        "-c:v".to_string(),
+                        "h264_videotoolbox".to_string(),
+                        "-q:v".to_string(),
+                        quality.to_string(),
+                    ]);
+                }
+            } else {
+                let crf = match quality_preset {
+                    Some("fast") => "23",
+                    Some("balanced") => "18",
+                    Some("quality") => "15",
+                    _ => "18",
+                };
+                encode_args.extend([
+                    "-c:v".to_string(),
+                    "libx264".to_string(),
+                    "-preset".to_string(),
+                    "medium".to_string(),
+                    "-crf".to_string(),
+                    crf.to_string(),
+                ]);
+            }
+        }
     }
 
-    // Add audio settings
+    // Add audio settings based on format
     if has_audio {
+        let audio_codec = match output_format {
+            "webm" => "libopus",
+            _ => "aac",
+        };
         encode_args.extend([
             "-c:a".to_string(),
-            "aac".to_string(),
+            audio_codec.to_string(),
             "-b:a".to_string(),
             "192k".to_string(),
             "-map".to_string(),

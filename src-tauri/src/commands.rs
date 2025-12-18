@@ -76,6 +76,7 @@ pub async fn convert_video(
     use_hevc: Option<bool>,
     quality_preset: Option<String>,
     interpolation_method: Option<String>,
+    output_format: Option<String>,
     state: State<'_, ConversionState>,
 ) -> Result<ConversionResult, String> {
     // Check if already converting
@@ -107,6 +108,7 @@ pub async fn convert_video(
 
     // Run conversion based on interpolation method
     let method = interpolation_method.as_deref().unwrap_or("minterpolate");
+    let format = output_format.as_deref().unwrap_or("mp4");
     
     let result = if method == "rife" {
         // Use RIFE AI interpolation
@@ -119,6 +121,7 @@ pub async fn convert_video(
             use_hw_accel.unwrap_or(true),
             use_hevc.unwrap_or(false),
             quality_preset.as_deref(),
+            format,
             cancel_flag,
             move |progress| {
                 let _ = app.emit("conversion-progress", progress);
@@ -136,6 +139,7 @@ pub async fn convert_video(
             use_hevc.unwrap_or(false),
             quality_preset.as_deref(),
             interpolation_method.as_deref(),
+            format,
             cancel_flag,
             move |progress| {
                 let _ = app.emit("conversion-progress", progress);

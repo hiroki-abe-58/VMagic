@@ -21,7 +21,8 @@ export async function convertVideo(
   useHwAccel: boolean = true,
   useHevc: boolean = false,
   qualityPreset: string = 'balanced',
-  interpolationMethod: string = 'minterpolate'
+  interpolationMethod: string = 'minterpolate',
+  outputFormat: string = 'mp4'
 ): Promise<ConversionResult> {
   return invoke<ConversionResult>('convert_video', {
     inputPath,
@@ -31,6 +32,7 @@ export async function convertVideo(
     useHevc,
     qualityPreset,
     interpolationMethod,
+    outputFormat,
   });
 }
 

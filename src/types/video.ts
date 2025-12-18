@@ -30,6 +30,9 @@ export type QualityPreset = 'fast' | 'balanced' | 'quality';
 // Interpolation method options
 export type InterpolationMethod = 'minterpolate' | 'framerate' | 'duplicate' | 'rife';
 
+// Output format options
+export type OutputFormat = 'mp4' | 'mov' | 'webm' | 'mkv';
+
 // Conversion progress event
 export interface ProgressEvent {
     progress: number;

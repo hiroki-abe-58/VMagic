@@ -6,7 +6,7 @@ import { BatchProgress } from './components/BatchProgress';
 import { checkFfmpeg } from './lib/tauri-commands';
 import { useBatchConvert } from './hooks/useBatchConvert';
 import { DEFAULT_FPS } from './lib/presets';
-import type { FFmpegStatus, QualityPreset, InterpolationMethod } from './types/video';
+import type { FFmpegStatus, QualityPreset, InterpolationMethod, OutputFormat } from './types/video';
 
 function App() {
   const [ffmpegStatus, setFfmpegStatus] = useState<FFmpegStatus | null>(null);
@@ -15,6 +15,7 @@ function App() {
   const [useHevc, setUseHevc] = useState(false);
   const [qualityPreset, setQualityPreset] = useState<QualityPreset>('balanced');
   const [interpolationMethod, setInterpolationMethod] = useState<InterpolationMethod>('minterpolate');
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>('mp4');
 
   const {
     items,
@@ -69,8 +70,9 @@ function App() {
       useHevc,
       qualityPreset,
       interpolationMethod,
+      outputFormat,
     });
-  }, [items, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod, startBatchConversion]);
+  }, [items, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod, outputFormat, startBatchConversion]);
 
   // Handle reset
   const handleReset = useCallback(() => {
@@ -395,14 +397,36 @@ function App() {
                       </p>
                     </div>
 
-                    {/* Output Format Summary */}
+                    {/* Output Format */}
                     <div className="py-2 border-t border-dark-border">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-text-muted">出力形式</span>
-                        <span className="text-text-primary font-medium">
-                          MP4 ({useHevc ? 'HEVC/H.265' : 'H.264'})
-                        </span>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-text-secondary text-sm">出力形式</span>
                       </div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {(['mp4', 'mov', 'webm', 'mkv'] as OutputFormat[]).map((format) => (
+                          <button
+                            key={format}
+                            onClick={() => setOutputFormat(format)}
+                            disabled={isProcessing}
+                            className={`
+                              py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200 uppercase
+                              ${outputFormat === format
+                                ? 'bg-green-500 text-white'
+                                : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                              }
+                              ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                            `}
+                          >
+                            {format}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-xs text-text-muted mt-2">
+                        {outputFormat === 'mp4' && `MP4 (${useHevc ? 'HEVC/H.265' : 'H.264'}) - 最も互換性が高い`}
+                        {outputFormat === 'mov' && `MOV (${useHevc ? 'HEVC/H.265' : 'H.264'}) - Apple製品向け`}
+                        {outputFormat === 'webm' && 'WebM (VP9) - Web向け、透過対応'}
+                        {outputFormat === 'mkv' && `MKV (${useHevc ? 'HEVC/H.265' : 'H.264'}) - 高い柔軟性`}
+                      </p>
                     </div>
                   </div>
                 </div>

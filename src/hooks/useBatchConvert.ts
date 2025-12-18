@@ -8,6 +8,7 @@ interface ConversionOptions {
   useHevc: boolean;
   qualityPreset: string;
   interpolationMethod: string;
+  outputFormat: string;
 }
 
 interface UseBatchConvertReturn {
@@ -27,12 +28,12 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-function generateOutputPath(inputPath: string, targetFps: number): string {
+function generateOutputPath(inputPath: string, targetFps: number, outputFormat: string = 'mp4'): string {
   const lastSlashIndex = inputPath.lastIndexOf('/');
   const inputDir = lastSlashIndex >= 0 ? inputPath.substring(0, lastSlashIndex) : '';
   const filename = inputPath.substring(lastSlashIndex + 1);
   const baseName = filename.replace(/\.[^/.]+$/, '');
-  const outputFilename = `${baseName}_${targetFps}fps.mp4`;
+  const outputFilename = `${baseName}_${targetFps}fps.${outputFormat}`;
   return inputDir ? `${inputDir}/${outputFilename}` : outputFilename;
 }
 
@@ -137,17 +138,17 @@ export function useBatchConvert(): UseBatchConvertReturn {
   }, []);
 
   const startBatchConversion = useCallback(async (options: ConversionOptions) => {
-    const { targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod } = options;
+    const { targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod, outputFormat } = options;
     const readyItems = items.filter(item => item.status === 'ready' || item.status === 'pending');
     if (readyItems.length === 0) return;
 
     setIsProcessing(true);
     cancelFlagRef.current = false;
 
-    // Update output paths with target fps
+    // Update output paths with target fps and format
     setItems(prev => prev.map(item => ({
       ...item,
-      outputPath: item.videoInfo ? generateOutputPath(item.inputPath, targetFps) : item.outputPath,
+      outputPath: item.videoInfo ? generateOutputPath(item.inputPath, targetFps, outputFormat) : item.outputPath,
       status: item.status === 'ready' ? 'pending' : item.status,
     })));
 
@@ -165,7 +166,7 @@ export function useBatchConvert(): UseBatchConvertReturn {
       if (cancelFlagRef.current) break;
 
       const item = readyItems[i];
-      const outputPath = generateOutputPath(item.inputPath, targetFps);
+      const outputPath = generateOutputPath(item.inputPath, targetFps, outputFormat);
 
       // Update current item status
       setItems(prev => prev.map(it => 
@@ -182,7 +183,7 @@ export function useBatchConvert(): UseBatchConvertReturn {
       } : null);
 
       try {
-        const result = await convertVideo(item.inputPath, outputPath, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod);
+        const result = await convertVideo(item.inputPath, outputPath, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod, outputFormat);
         
         if (result.success) {
           completedCount++;
