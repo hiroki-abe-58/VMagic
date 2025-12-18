@@ -1010,14 +1010,37 @@ where
     // Phase 2: Real-ESRGAN upscale (60% of progress)
     log::info!("Phase 2: Running Real-ESRGAN upscale ({}x, model: {})...", scale_factor, model_name);
 
+    // Find model directory
+    let model_paths = [
+        "/usr/local/share/realesrgan-ncnn-vulkan/models",
+        "/opt/homebrew/share/realesrgan-ncnn-vulkan/models",
+        &format!("{}/realesrgan-ncnn-vulkan-v0.2.0-macos/models", std::env::var("HOME").unwrap_or_default()),
+        "/tmp/models",
+    ];
+    
+    let model_dir = model_paths
+        .iter()
+        .find(|p| std::path::Path::new(p).exists())
+        .map(|s| s.to_string());
+
+    log::info!("Using model directory: {:?}", model_dir);
+
+    let mut args = vec![
+        "-i".to_string(), input_frames_dir.to_string_lossy().to_string(),
+        "-o".to_string(), output_frames_dir.to_string_lossy().to_string(),
+        "-s".to_string(), scale_factor.to_string(),
+        "-n".to_string(), model_name.to_string(),
+        "-f".to_string(), "png".to_string(),
+    ];
+
+    // Add model path if found
+    if let Some(ref path) = model_dir {
+        args.push("-m".to_string());
+        args.push(path.clone());
+    }
+
     let realesrgan_output = Command::new("realesrgan-ncnn-vulkan")
-        .args([
-            "-i", &input_frames_dir.to_string_lossy(),
-            "-o", &output_frames_dir.to_string_lossy(),
-            "-s", &scale_factor.to_string(),
-            "-n", model_name,
-            "-f", "png",
-        ])
+        .args(&args)
         .output()
         .await
         .map_err(|e| format!("Real-ESRGAN実行エラー: {}", e))?;
