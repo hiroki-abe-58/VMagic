@@ -6,7 +6,8 @@ import { BatchProgress } from './components/BatchProgress';
 import { checkFfmpeg } from './lib/tauri-commands';
 import { useBatchConvert } from './hooks/useBatchConvert';
 import { DEFAULT_FPS } from './lib/presets';
-import type { FFmpegStatus, QualityPreset, InterpolationMethod, OutputFormat, UpscaleModel, UpscaleScale } from './types/video';
+import type { FFmpegStatus, QualityPreset, InterpolationMethod, OutputFormat, UpscaleModel, UpscaleScale, TargetResolution } from './types/video';
+import { TARGET_RESOLUTIONS, getAvailableResolutions } from './types/video';
 
 type AppMode = 'fps' | 'upscale';
 
@@ -22,6 +23,8 @@ function App() {
   // Upscale settings
   const [upscaleModel, setUpscaleModel] = useState<UpscaleModel>('realesrgan-x4plus');
   const [upscaleScale, setUpscaleScale] = useState<UpscaleScale>(4);
+  const [upscaleMode, setUpscaleMode] = useState<'resolution' | 'scale'>('resolution');
+  const [targetResolution, setTargetResolution] = useState<TargetResolution | null>(TARGET_RESOLUTIONS[3]); // Default to 4K
 
   const {
     items,
@@ -523,40 +526,129 @@ function App() {
                   )}
 
                   <div className="space-y-4">
-                    {/* Scale Factor */}
+                    {/* Mode Toggle: Resolution vs Scale */}
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-text-secondary text-sm">拡大率</span>
+                        <span className="text-text-secondary text-sm">指定方法</span>
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {([2, 3, 4] as const).map((scale) => (
-                          <button
-                            key={scale}
-                            onClick={() => setUpscaleScale(scale)}
-                            disabled={isProcessing || !ffmpegStatus?.realesrgan_available}
-                            className={`
-                              py-3 px-3 rounded-lg text-lg font-bold transition-colors duration-200
-                              ${upscaleScale === scale
-                                ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white'
-                                : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
-                              }
-                              ${(isProcessing || !ffmpegStatus?.realesrgan_available) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-                            `}
-                          >
-                            {scale}x
-                          </button>
-                        ))}
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => setUpscaleMode('resolution')}
+                          disabled={isProcessing}
+                          className={`
+                            py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200
+                            ${upscaleMode === 'resolution'
+                              ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white'
+                              : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                            }
+                            ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                          `}
+                        >
+                          目標解像度
+                        </button>
+                        <button
+                          onClick={() => setUpscaleMode('scale')}
+                          disabled={isProcessing}
+                          className={`
+                            py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200
+                            ${upscaleMode === 'scale'
+                              ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white'
+                              : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                            }
+                            ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                          `}
+                        >
+                          倍率指定
+                        </button>
                       </div>
-                      <p className="text-xs text-text-muted mt-2">
-                        {items[0]?.videoInfo && (
-                          <>
-                            {items[0].videoInfo.width}x{items[0].videoInfo.height} 
-                            {' -> '}
-                            {items[0].videoInfo.width * upscaleScale}x{items[0].videoInfo.height * upscaleScale}
-                          </>
-                        )}
-                      </p>
                     </div>
+
+                    {/* Target Resolution Selection */}
+                    {upscaleMode === 'resolution' && (
+                      <div className="pt-4 border-t border-dark-border">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-text-secondary text-sm">目標解像度</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(() => {
+                            const inputVideo = items[0]?.videoInfo;
+                            const availableRes = inputVideo 
+                              ? getAvailableResolutions(inputVideo.width, inputVideo.height)
+                              : TARGET_RESOLUTIONS.map(r => ({ ...r, scale: 4 as UpscaleScale, outputWidth: r.width, outputHeight: r.height }));
+                            
+                            return availableRes.map((res) => (
+                              <button
+                                key={res.shortName}
+                                onClick={() => {
+                                  setTargetResolution(res);
+                                  setUpscaleScale(res.scale);
+                                }}
+                                disabled={isProcessing || !ffmpegStatus?.realesrgan_available}
+                                className={`
+                                  py-3 px-3 rounded-lg text-sm font-medium transition-colors duration-200 text-left
+                                  ${targetResolution?.shortName === res.shortName
+                                    ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white'
+                                    : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                                  }
+                                  ${(isProcessing || !ffmpegStatus?.realesrgan_available) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                                `}
+                              >
+                                <div className="font-bold">{res.shortName}</div>
+                                <div className="text-xs opacity-80">{res.width}x{res.height}</div>
+                                <div className="text-xs opacity-60">{res.scale}x拡大</div>
+                              </button>
+                            ));
+                          })()}
+                        </div>
+                        <p className="text-xs text-text-muted mt-2">
+                          {items[0]?.videoInfo && targetResolution && (
+                            <>
+                              {items[0].videoInfo.width}x{items[0].videoInfo.height}
+                              {' -> '}
+                              {items[0].videoInfo.width * upscaleScale}x{items[0].videoInfo.height * upscaleScale}
+                              {' '}({upscaleScale}x)
+                            </>
+                          )}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Scale Factor Selection */}
+                    {upscaleMode === 'scale' && (
+                      <div className="pt-4 border-t border-dark-border">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-text-secondary text-sm">拡大率</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {([2, 3, 4] as const).map((scale) => (
+                            <button
+                              key={scale}
+                              onClick={() => setUpscaleScale(scale)}
+                              disabled={isProcessing || !ffmpegStatus?.realesrgan_available}
+                              className={`
+                                py-3 px-3 rounded-lg text-lg font-bold transition-colors duration-200
+                                ${upscaleScale === scale
+                                  ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white'
+                                  : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                                }
+                                ${(isProcessing || !ffmpegStatus?.realesrgan_available) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                              `}
+                            >
+                              {scale}x
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-xs text-text-muted mt-2">
+                          {items[0]?.videoInfo && (
+                            <>
+                              {items[0].videoInfo.width}x{items[0].videoInfo.height} 
+                              {' -> '}
+                              {items[0].videoInfo.width * upscaleScale}x{items[0].videoInfo.height * upscaleScale}
+                            </>
+                          )}
+                        </p>
+                      </div>
+                    )}
 
                     {/* Model Selection */}
                     <div className="pt-4 border-t border-dark-border">
