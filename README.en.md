@@ -7,11 +7,13 @@ A desktop application for video frame rate conversion using ffmpeg's minterpolat
 
 ## Features
 
+- **Batch processing support**: Convert multiple files at once
 - **Minterpolate-based frame interpolation**: Smooth conversion with high-quality frame interpolation
 - **Duration preservation guarantee**: Ensures duration difference within ±0.1 seconds before and after conversion
 - **Real-time progress display**: Shows progress, frame count, and processing speed during conversion
 - **Preset support**: 24fps (Cinema), 25fps (PAL), 29.97fps (NTSC), 30fps, 50fps, 59.94fps, 60fps
 - **Dark theme UI**: Modern design with neon yellow accents
+- **Auto output path**: Converted files are automatically saved in the same directory as the source
 
 ## Tech Stack
 
@@ -57,12 +59,21 @@ npm run tauri:build
 
 ## Usage
 
+### Single File Conversion
 1. Launch the app
 2. Drag & drop a video file or click to select
 3. Choose target frame rate (preset or custom)
-4. Select output destination
-5. Click "Start Conversion"
-6. After conversion, verify the duration validation result
+4. Click "Start Batch Conversion"
+5. After conversion, verify the duration validation result
+
+### Batch Conversion (Multiple Files)
+1. Launch the app
+2. Drag & drop multiple video files, or select multiple files
+3. Review the file list (unwanted files can be removed)
+4. Choose target frame rate
+5. Click "Start Batch Conversion"
+6. Conversion status for each file is displayed in real-time
+7. Cancel anytime if needed
 
 ## ffmpeg Command Used
 
@@ -87,7 +98,9 @@ ffmpeg -i input.mp4 \
 VMagic/
 ├── src/                          # React Frontend
 │   ├── components/               # UI Components
-│   │   ├── VideoDropZone.tsx     # Drag & drop area
+│   │   ├── VideoDropZone.tsx     # Drag & drop area (multi-file support)
+│   │   ├── BatchFileList.tsx     # Batch file list
+│   │   ├── BatchProgress.tsx     # Batch progress display
 │   │   ├── VideoInfo.tsx         # Video information display
 │   │   ├── FpsSettings.tsx       # FPS settings + presets
 │   │   ├── OutputPreview.tsx     # Output preview
@@ -95,6 +108,7 @@ VMagic/
 │   │   ├── ProgressBar.tsx       # Progress display
 │   │   └── OutputSelector.tsx    # Output destination selector
 │   ├── hooks/                    # Custom hooks
+│   │   ├── useBatchConvert.ts    # Batch conversion processing
 │   │   ├── useVideoInfo.ts       # Video info fetching
 │   │   └── useConvert.ts         # Conversion processing
 │   ├── lib/                      # Utilities
@@ -121,6 +135,11 @@ VMagic/
 2. **During conversion**: Specify target fps directly with minterpolate filter (duration automatically preserved)
 3. **After conversion**: Get output video duration and compare with input
 4. **Validation**: Success if difference is within ±0.1 seconds, error displayed if exceeded
+
+## Supported Formats
+
+- **Input**: MP4, MOV, AVI, MKV, WebM, FLV, M4V, WMV, MPG, MPEG
+- **Output**: MP4 (H.264)
 
 ## Troubleshooting
 
@@ -155,4 +174,3 @@ rustup update stable
 ## License
 
 MIT License
-
