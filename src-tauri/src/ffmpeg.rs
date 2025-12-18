@@ -18,6 +18,7 @@ pub struct VideoInfo {
     pub codec: String,
     pub bitrate: Option<u64>,
     pub file_size: u64,
+    pub thumbnail: Option<String>, // Base64 encoded JPEG thumbnail
 }
 
 /// Check if ffmpeg and ffprobe are available on the system
@@ -166,6 +167,9 @@ pub async fn get_video_info(path: &str) -> Result<VideoInfo, String> {
         .as_str()
         .and_then(|s| s.parse::<u64>().ok());
 
+    // Generate thumbnail
+    let thumbnail = generate_thumbnail(path, duration).await.ok();
+
     Ok(VideoInfo {
         path: path.to_string(),
         filename,
@@ -176,6 +180,7 @@ pub async fn get_video_info(path: &str) -> Result<VideoInfo, String> {
         codec,
         bitrate,
         file_size,
+        thumbnail,
     })
 }
 
@@ -192,6 +197,50 @@ fn parse_frame_rate(fps_str: &str) -> f64 {
         }
     }
     fps_str.parse().unwrap_or(0.0)
+}
+
+/// Generate thumbnail from video at 1 second or 10% of duration
+async fn generate_thumbnail(path: &str, duration: f64) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    // Seek position: 1 second or 10% of duration (whichever is smaller), but at least 0.1s
+    let seek_time = if duration > 1.0 {
+        1.0_f64.min(duration * 0.1).max(0.1)
+    } else {
+        0.0
+    };
+
+    // Generate thumbnail using ffmpeg
+    // Output: JPEG, 200px width, maintain aspect ratio
+    let output = Command::new("ffmpeg")
+        .args([
+            "-ss",
+            &format!("{:.2}", seek_time),
+            "-i",
+            path,
+            "-vframes",
+            "1",
+            "-vf",
+            "scale=200:-1",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "-q:v",
+            "5", // Quality (2-31, lower is better)
+            "pipe:1",
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("サムネイル生成エラー: {}", e))?;
+
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err("サムネイル生成に失敗".to_string());
+    }
+
+    // Encode to base64 with data URI
+    let base64_data = STANDARD.encode(&output.stdout);
+    Ok(format!("data:image/jpeg;base64,{}", base64_data))
 }
 
 /// Convert video using minterpolate filter

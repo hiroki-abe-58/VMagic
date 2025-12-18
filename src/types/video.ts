@@ -9,6 +9,7 @@ export interface VideoInfo {
     codec: string;
     bitrate: number | null;
     file_size: number;
+    thumbnail: string | null; // Base64 encoded JPEG thumbnail
 }
 
 // FFmpeg availability status

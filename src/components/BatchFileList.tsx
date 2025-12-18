@@ -124,12 +124,12 @@ export function BatchFileList({ items, onRemove, isDisabled }: BatchFileListProp
       </div>
 
       {/* File List */}
-      <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+      <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
         {items.map((item) => (
           <div
             key={item.id}
             className={`
-              bg-dark-surface-light rounded-lg p-3 flex items-center gap-3
+              bg-dark-surface-light rounded-lg p-3 flex items-center gap-4
               border transition-colors duration-200
               ${item.status === 'converting' 
                 ? 'border-neon-yellow/50' 
@@ -141,6 +141,26 @@ export function BatchFileList({ items, onRemove, isDisabled }: BatchFileListProp
               }
             `}
           >
+            {/* Thumbnail */}
+            <div className="flex-shrink-0 w-16 h-12 rounded-md overflow-hidden bg-dark-bg flex items-center justify-center">
+              {item.status === 'loading' ? (
+                <svg className="w-5 h-5 text-text-muted animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              ) : item.videoInfo?.thumbnail ? (
+                <img 
+                  src={item.videoInfo.thumbnail} 
+                  alt={item.videoInfo.filename}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <svg className="w-6 h-6 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              )}
+            </div>
+
             {/* Status Icon */}
             <div className="flex-shrink-0">
               {getStatusIcon(item.status)}
