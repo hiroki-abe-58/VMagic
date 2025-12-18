@@ -10,7 +10,7 @@ interface UseBatchConvertReturn {
   removeFile: (id: string) => void;
   clearFiles: () => void;
   updateOutputPath: (id: string, outputPath: string) => void;
-  startBatchConversion: (targetFps: number) => Promise<void>;
+  startBatchConversion: (targetFps: number, useHwAccel: boolean) => Promise<void>;
   cancelBatchConversion: () => Promise<void>;
   reset: () => void;
 }
@@ -128,7 +128,7 @@ export function useBatchConvert(): UseBatchConvertReturn {
     ));
   }, []);
 
-  const startBatchConversion = useCallback(async (targetFps: number) => {
+  const startBatchConversion = useCallback(async (targetFps: number, useHwAccel: boolean) => {
     const readyItems = items.filter(item => item.status === 'ready' || item.status === 'pending');
     if (readyItems.length === 0) return;
 
@@ -173,7 +173,7 @@ export function useBatchConvert(): UseBatchConvertReturn {
       } : null);
 
       try {
-        const result = await convertVideo(item.inputPath, outputPath, targetFps);
+        const result = await convertVideo(item.inputPath, outputPath, targetFps, useHwAccel);
         
         if (result.success) {
           completedCount++;

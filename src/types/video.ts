@@ -17,6 +17,7 @@ export interface FFmpegStatus {
     ffmpeg_path: string | null;
     ffprobe_path: string | null;
     version: string | null;
+    videotoolbox_available: boolean;
 }
 
 // Conversion progress event

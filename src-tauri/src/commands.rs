@@ -27,6 +27,7 @@ pub struct FFmpegStatus {
     pub ffmpeg_path: Option<String>,
     pub ffprobe_path: Option<String>,
     pub version: Option<String>,
+    pub videotoolbox_available: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -68,6 +69,7 @@ pub async fn convert_video(
     input_path: String,
     output_path: String,
     target_fps: f64,
+    use_hw_accel: Option<bool>,
     state: State<'_, ConversionState>,
 ) -> Result<ConversionResult, String> {
     // Check if already converting
@@ -95,6 +97,7 @@ pub async fn convert_video(
         &output_path,
         target_fps,
         input_duration,
+        use_hw_accel.unwrap_or(true),
         cancel_flag,
         move |progress| {
             let _ = app.emit("conversion-progress", progress);

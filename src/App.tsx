@@ -11,6 +11,7 @@ import type { FFmpegStatus } from './types/video';
 function App() {
   const [ffmpegStatus, setFfmpegStatus] = useState<FFmpegStatus | null>(null);
   const [targetFps, setTargetFps] = useState(DEFAULT_FPS);
+  const [useHwAccel, setUseHwAccel] = useState(true);
 
   const {
     items,
@@ -30,9 +31,13 @@ function App() {
       try {
         const status = await checkFfmpeg();
         setFfmpegStatus(status);
+        // Disable hw accel if VideoToolbox not available
+        if (!status.videotoolbox_available) {
+          setUseHwAccel(false);
+        }
       } catch (err) {
         console.error('Failed to check ffmpeg:', err);
-        setFfmpegStatus({ available: false, ffmpeg_path: null, ffprobe_path: null, version: null });
+        setFfmpegStatus({ available: false, ffmpeg_path: null, ffprobe_path: null, version: null, videotoolbox_available: false });
       }
     };
     check();
@@ -46,8 +51,8 @@ function App() {
   // Handle conversion start
   const handleStartConversion = useCallback(async () => {
     if (items.length === 0) return;
-    await startBatchConversion(targetFps);
-  }, [items, targetFps, startBatchConversion]);
+    await startBatchConversion(targetFps, useHwAccel);
+  }, [items, targetFps, useHwAccel, startBatchConversion]);
 
   // Handle reset
   const handleReset = useCallback(() => {
@@ -87,7 +92,17 @@ function App() {
           </div>
 
           {/* FFmpeg Status */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4">
+            {ffmpegStatus?.videotoolbox_available && (
+              <div className="flex items-center gap-2 text-neon-yellow text-sm">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                    d="M13 10V3L4 14h7v7l9-11h-7z" 
+                  />
+                </svg>
+                <span>VideoToolbox</span>
+              </div>
+            )}
             {ffmpegStatus === null ? (
               <span className="text-text-muted text-sm">ffmpeg確認中...</span>
             ) : ffmpegStatus.available ? (
@@ -176,12 +191,49 @@ function App() {
                       <span className="text-text-secondary">出力FPS</span>
                       <span className="text-neon-yellow font-medium">{targetFps} fps</span>
                     </div>
-                    <div className="flex items-center justify-between py-2">
+                    <div className="flex items-center justify-between py-2 border-b border-dark-border">
                       <span className="text-text-secondary">出力形式</span>
                       <span className="text-text-primary font-medium">MP4 (H.264)</span>
                     </div>
+                    
+                    {/* Hardware Acceleration Toggle */}
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-text-secondary">ハードウェア高速化</span>
+                        {ffmpegStatus?.videotoolbox_available ? (
+                          <span className="text-xs px-2 py-0.5 rounded bg-neon-yellow/20 text-neon-yellow">
+                            VideoToolbox
+                          </span>
+                        ) : (
+                          <span className="text-xs px-2 py-0.5 rounded bg-dark-bg text-text-muted">
+                            利用不可
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setUseHwAccel(!useHwAccel)}
+                        disabled={!ffmpegStatus?.videotoolbox_available || isProcessing}
+                        className={`
+                          relative w-12 h-6 rounded-full transition-colors duration-200
+                          ${useHwAccel && ffmpegStatus?.videotoolbox_available
+                            ? 'bg-neon-yellow' 
+                            : 'bg-dark-bg'
+                          }
+                          ${(!ffmpegStatus?.videotoolbox_available || isProcessing) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                        `}
+                      >
+                        <div className={`
+                          absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200
+                          ${useHwAccel && ffmpegStatus?.videotoolbox_available ? 'translate-x-7' : 'translate-x-1'}
+                        `} />
+                      </button>
+                    </div>
+                    
                     <p className="text-xs text-text-muted mt-2">
-                      変換後のファイルは元のファイルと同じディレクトリに保存されます
+                      {useHwAccel && ffmpegStatus?.videotoolbox_available 
+                        ? 'Apple Silicon Media Engineでエンコードを高速化'
+                        : '変換後のファイルは元のファイルと同じディレクトリに保存されます'
+                      }
                     </p>
                   </div>
                 </div>
@@ -277,6 +329,16 @@ function App() {
                 <p className="text-text-muted text-sm mt-2">
                   複数ファイルの一括変換に対応しています
                 </p>
+                {ffmpegStatus?.videotoolbox_available && (
+                  <p className="text-neon-yellow text-sm mt-2 flex items-center justify-center gap-2">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M13 10V3L4 14h7v7l9-11h-7z" 
+                      />
+                    </svg>
+                    Apple Silicon高速化対応
+                  </p>
+                )}
               </div>
             )}
           </div>

@@ -17,12 +17,14 @@ export async function getVideoInfo(path: string): Promise<VideoInfo> {
 export async function convertVideo(
   inputPath: string,
   outputPath: string,
-  targetFps: number
+  targetFps: number,
+  useHwAccel: boolean = true
 ): Promise<ConversionResult> {
   return invoke<ConversionResult>('convert_video', {
     inputPath,
     outputPath,
     targetFps,
+    useHwAccel,
   });
 }
 

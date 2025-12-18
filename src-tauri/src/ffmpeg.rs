@@ -50,6 +50,23 @@ pub async fn check_ffmpeg_availability() -> Result<FFmpegStatus, String> {
         None
     };
 
+    // Check VideoToolbox availability
+    let videotoolbox_available = if ffmpeg_path.is_some() {
+        let encoders_output = Command::new("ffmpeg")
+            .args(["-hide_banner", "-encoders"])
+            .output()
+            .await;
+        encoders_output
+            .ok()
+            .map(|o| {
+                let output = String::from_utf8_lossy(&o.stdout);
+                output.contains("h264_videotoolbox")
+            })
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
     let available = ffmpeg_path.is_some() && ffprobe_path.is_some();
 
     Ok(FFmpegStatus {
@@ -57,6 +74,7 @@ pub async fn check_ffmpeg_availability() -> Result<FFmpegStatus, String> {
         ffmpeg_path,
         ffprobe_path,
         version,
+        videotoolbox_available,
     })
 }
 
@@ -178,6 +196,7 @@ pub async fn convert_video_minterpolate<F>(
     output_path: &str,
     target_fps: f64,
     input_duration: f64,
+    use_hw_accel: bool,
     cancel_flag: Arc<AtomicBool>,
     progress_callback: F,
 ) -> Result<f64, String>
@@ -190,21 +209,53 @@ where
         target_fps
     );
 
+    // Build ffmpeg arguments
+    let mut args = vec![
+        "-y".to_string(), // Overwrite output
+        "-i".to_string(),
+        input_path.to_string(),
+        "-filter:v".to_string(),
+        filter,
+    ];
+
+    // Add video codec settings
+    if use_hw_accel {
+        // Use VideoToolbox hardware encoder (Apple Silicon)
+        args.extend([
+            "-c:v".to_string(),
+            "h264_videotoolbox".to_string(),
+            "-q:v".to_string(),
+            "65".to_string(), // Quality (0-100, higher is better, 65 is high quality)
+            "-allow_sw".to_string(),
+            "1".to_string(), // Allow software fallback
+        ]);
+        log::info!("Using VideoToolbox hardware encoding");
+    } else {
+        // Use software encoder with good settings
+        args.extend([
+            "-c:v".to_string(),
+            "libx264".to_string(),
+            "-preset".to_string(),
+            "medium".to_string(),
+            "-crf".to_string(),
+            "18".to_string(),
+        ]);
+        log::info!("Using software encoding (libx264)");
+    }
+
+    // Add audio and progress settings
+    args.extend([
+        "-c:a".to_string(),
+        "copy".to_string(), // Copy audio stream
+        "-progress".to_string(),
+        "pipe:1".to_string(), // Output progress to stdout
+        "-nostats".to_string(),
+        output_path.to_string(),
+    ]);
+
     // Spawn ffmpeg process
     let mut child = Command::new("ffmpeg")
-        .args([
-            "-y", // Overwrite output
-            "-i",
-            input_path,
-            "-filter:v",
-            &filter,
-            "-c:a",
-            "copy", // Copy audio stream
-            "-progress",
-            "pipe:1", // Output progress to stdout
-            "-nostats",
-            output_path,
-        ])
+        .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

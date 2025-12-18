@@ -7,6 +7,7 @@ ffmpegのminterpolateフィルタを使用した動画フレームレート変�
 
 ## 特徴
 
+- **Apple Silicon高速化**: VideoToolboxによるハードウェアエンコードに対応（M1/M2/M3）
 - **バッチ処理対応**: 複数ファイルの一括変換に対応
 - **minterpolateベースのフレーム補間**: 高品質なフレーム補間による滑らかな変換
 - **総尺維持保証**: 変換前後の総尺差を±0.1秒以内に保証
@@ -140,6 +141,22 @@ VMagic/
 
 - **入力**: MP4, MOV, AVI, MKV, WebM, FLV, M4V, WMV, MPG, MPEG
 - **出力**: MP4 (H.264)
+
+## ハードウェア高速化
+
+Apple Silicon搭載Mac（M1/M2/M3）では、VideoToolboxを使用したハードウェアエンコードに対応しています。
+
+### VideoToolboxの利点
+- Apple Silicon Media Engineを使用
+- エンコード処理が大幅に高速化（ソフトウェアの2-5倍程度）
+- バッテリー消費を抑制
+- 高品質な出力を維持
+
+### 注意事項
+- フレーム補間処理（minterpolate）自体はCPUで実行されます
+- VideoToolboxはエンコード（出力）部分のみを高速化
+- 設定画面でオン/オフを切り替え可能
+- VideoToolboxが利用できない環境では自動的にソフトウェアエンコード（libx264）にフォールバック
 
 ## トラブルシューティング
 

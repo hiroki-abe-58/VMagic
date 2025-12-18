@@ -7,6 +7,7 @@ A desktop application for video frame rate conversion using ffmpeg's minterpolat
 
 ## Features
 
+- **Apple Silicon acceleration**: Hardware encoding via VideoToolbox (M1/M2/M3)
 - **Batch processing support**: Convert multiple files at once
 - **Minterpolate-based frame interpolation**: Smooth conversion with high-quality frame interpolation
 - **Duration preservation guarantee**: Ensures duration difference within ±0.1 seconds before and after conversion
@@ -140,6 +141,22 @@ VMagic/
 
 - **Input**: MP4, MOV, AVI, MKV, WebM, FLV, M4V, WMV, MPG, MPEG
 - **Output**: MP4 (H.264)
+
+## Hardware Acceleration
+
+Macs with Apple Silicon (M1/M2/M3) support hardware encoding via VideoToolbox.
+
+### VideoToolbox Benefits
+- Uses Apple Silicon Media Engine
+- Significantly faster encoding (2-5x vs software)
+- Reduced battery consumption
+- Maintains high quality output
+
+### Notes
+- Frame interpolation (minterpolate) runs on CPU
+- VideoToolbox accelerates only the encoding (output) stage
+- Toggle on/off in settings panel
+- Automatically falls back to software encoding (libx264) when VideoToolbox is unavailable
 
 ## Troubleshooting
 
