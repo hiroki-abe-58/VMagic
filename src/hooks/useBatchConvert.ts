@@ -7,6 +7,7 @@ interface ConversionOptions {
   useHwAccel: boolean;
   useHevc: boolean;
   qualityPreset: string;
+  interpolationMethod: string;
 }
 
 interface UseBatchConvertReturn {
@@ -136,7 +137,7 @@ export function useBatchConvert(): UseBatchConvertReturn {
   }, []);
 
   const startBatchConversion = useCallback(async (options: ConversionOptions) => {
-    const { targetFps, useHwAccel, useHevc, qualityPreset } = options;
+    const { targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod } = options;
     const readyItems = items.filter(item => item.status === 'ready' || item.status === 'pending');
     if (readyItems.length === 0) return;
 
@@ -181,7 +182,7 @@ export function useBatchConvert(): UseBatchConvertReturn {
       } : null);
 
       try {
-        const result = await convertVideo(item.inputPath, outputPath, targetFps, useHwAccel, useHevc, qualityPreset);
+        const result = await convertVideo(item.inputPath, outputPath, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod);
         
         if (result.success) {
           completedCount++;

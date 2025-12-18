@@ -13,23 +13,25 @@ export async function getVideoInfo(path: string): Promise<VideoInfo> {
     return invoke<VideoInfo>('get_video_info', { path });
 }
 
-// Convert video with minterpolate
+// Convert video with specified interpolation method
 export async function convertVideo(
-    inputPath: string,
-    outputPath: string,
-    targetFps: number,
-    useHwAccel: boolean = true,
-    useHevc: boolean = false,
-    qualityPreset: string = 'balanced'
+  inputPath: string,
+  outputPath: string,
+  targetFps: number,
+  useHwAccel: boolean = true,
+  useHevc: boolean = false,
+  qualityPreset: string = 'balanced',
+  interpolationMethod: string = 'minterpolate'
 ): Promise<ConversionResult> {
-    return invoke<ConversionResult>('convert_video', {
-        inputPath,
-        outputPath,
-        targetFps,
-        useHwAccel,
-        useHevc,
-        qualityPreset,
-    });
+  return invoke<ConversionResult>('convert_video', {
+    inputPath,
+    outputPath,
+    targetFps,
+    useHwAccel,
+    useHevc,
+    qualityPreset,
+    interpolationMethod,
+  });
 }
 
 // Cancel ongoing conversion

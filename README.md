@@ -77,16 +77,44 @@ npm run tauri:build
 6. 各ファイルの変換状況がリアルタイムで表示される
 7. 必要に応じてキャンセル可能
 
-## 使用するffmpegコマンド
+## フレーム補間方式
 
+3つのフレーム補間方式から選択できます：
+
+### 1. 高品質 (minterpolate)
 ```bash
 ffmpeg -i input.mp4 \
   -filter:v "minterpolate=fps={target_fps}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1" \
-  -c:a copy \
-  output.mp4
+  -c:a copy output.mp4
 ```
+- **品質**: 最高
+- **速度**: 遅い（CPU集約）
+- **特徴**: モーション補間による滑らかなフレーム生成
+- **用途**: 品質重視の最終出力
 
-### minterpolateパラメータ
+### 2. バランス (framerate)
+```bash
+ffmpeg -i input.mp4 \
+  -filter:v "framerate=fps={target_fps}:interp_start=0:interp_end=255:scene=8.2" \
+  -c:a copy output.mp4
+```
+- **品質**: 中程度
+- **速度**: 速い
+- **特徴**: フレームブレンディングによる補間
+- **用途**: 速度と品質のバランス
+
+### 3. 高速 (duplicate)
+```bash
+ffmpeg -i input.mp4 \
+  -filter:v "fps={target_fps}" \
+  -c:a copy output.mp4
+```
+- **品質**: 低い
+- **速度**: 最速
+- **特徴**: 単純なフレーム複製/ドロップ
+- **用途**: プレビュー、高速処理
+
+### minterpolateパラメータ詳細
 
 - `fps`: 目標フレームレート
 - `mi_mode=mci`: Motion Compensated Interpolation

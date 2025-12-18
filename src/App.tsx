@@ -6,7 +6,7 @@ import { BatchProgress } from './components/BatchProgress';
 import { checkFfmpeg } from './lib/tauri-commands';
 import { useBatchConvert } from './hooks/useBatchConvert';
 import { DEFAULT_FPS } from './lib/presets';
-import type { FFmpegStatus, QualityPreset } from './types/video';
+import type { FFmpegStatus, QualityPreset, InterpolationMethod } from './types/video';
 
 function App() {
   const [ffmpegStatus, setFfmpegStatus] = useState<FFmpegStatus | null>(null);
@@ -14,6 +14,7 @@ function App() {
   const [useHwAccel, setUseHwAccel] = useState(true);
   const [useHevc, setUseHevc] = useState(false);
   const [qualityPreset, setQualityPreset] = useState<QualityPreset>('balanced');
+  const [interpolationMethod, setInterpolationMethod] = useState<InterpolationMethod>('minterpolate');
 
   const {
     items,
@@ -65,8 +66,9 @@ function App() {
       useHwAccel,
       useHevc,
       qualityPreset,
+      interpolationMethod,
     });
-  }, [items, targetFps, useHwAccel, useHevc, qualityPreset, startBatchConversion]);
+  }, [items, targetFps, useHwAccel, useHevc, qualityPreset, interpolationMethod, startBatchConversion]);
 
   // Handle reset
   const handleReset = useCallback(() => {
@@ -264,10 +266,43 @@ function App() {
                       </button>
                     </div>
 
+                    {/* Interpolation Method */}
+                    <div className="py-2 border-t border-dark-border">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-text-secondary text-sm">フレーム補間方式</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(['minterpolate', 'framerate', 'duplicate'] as InterpolationMethod[]).map((method) => (
+                          <button
+                            key={method}
+                            onClick={() => setInterpolationMethod(method)}
+                            disabled={isProcessing}
+                            className={`
+                              py-2 px-3 rounded-lg text-sm font-medium transition-colors duration-200
+                              ${interpolationMethod === method
+                                ? 'bg-purple-500 text-white'
+                                : 'bg-dark-bg text-text-secondary hover:bg-dark-surface-light'
+                              }
+                              ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                            `}
+                          >
+                            {method === 'minterpolate' && '高品質'}
+                            {method === 'framerate' && 'バランス'}
+                            {method === 'duplicate' && '高速'}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-xs text-text-muted mt-2">
+                        {interpolationMethod === 'minterpolate' && 'モーション補間: 最高品質だが処理が遅い (CPU集約)'}
+                        {interpolationMethod === 'framerate' && 'フレームブレンド: 品質と速度のバランス'}
+                        {interpolationMethod === 'duplicate' && 'フレーム複製: 最速だが品質は低い'}
+                      </p>
+                    </div>
+
                     {/* Quality Preset */}
                     <div className="py-2 border-t border-dark-border">
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-text-secondary text-sm">品質プリセット</span>
+                        <span className="text-text-secondary text-sm">エンコード品質</span>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
                         {(['fast', 'balanced', 'quality'] as QualityPreset[]).map((preset) => (
@@ -418,7 +453,7 @@ function App() {
 
       {/* Footer */}
       <footer className="py-6 text-center text-text-muted text-sm flex-shrink-0 border-t border-dark-border">
-        <p>VMagic - minterpolateベースのフレーム補間変換</p>
+        <p>VMagic - フレーム補間変換ツール</p>
         <p className="text-xs mt-1 opacity-70">総尺維持保証 (許容誤差 ±0.1秒)</p>
       </footer>
     </div>

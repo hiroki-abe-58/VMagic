@@ -63,7 +63,7 @@ pub async fn get_video_info(path: String) -> Result<VideoInfo, String> {
     ffmpeg::get_video_info(&path).await
 }
 
-/// Convert video with minterpolate filter
+/// Convert video with specified interpolation method
 #[tauri::command]
 pub async fn convert_video(
     app: AppHandle,
@@ -73,6 +73,7 @@ pub async fn convert_video(
     use_hw_accel: Option<bool>,
     use_hevc: Option<bool>,
     quality_preset: Option<String>,
+    interpolation_method: Option<String>,
     state: State<'_, ConversionState>,
 ) -> Result<ConversionResult, String> {
     // Check if already converting
@@ -111,6 +112,7 @@ pub async fn convert_video(
         use_hw_accel.unwrap_or(true),
         use_hevc.unwrap_or(false),
         quality_preset.as_deref(),
+        interpolation_method.as_deref(),
         cancel_flag,
         move |progress| {
             let _ = app.emit("conversion-progress", progress);

@@ -243,7 +243,28 @@ async fn generate_thumbnail(path: &str, duration: f64) -> Result<String, String>
     Ok(format!("data:image/jpeg;base64,{}", base64_data))
 }
 
-/// Convert video using minterpolate filter
+/// Interpolation method for frame rate conversion
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InterpolationMethod {
+    /// Motion Compensated Interpolation - highest quality, slowest
+    Minterpolate,
+    /// Frame blending interpolation - balanced quality and speed
+    Framerate,
+    /// Simple frame duplication - fastest, lowest quality
+    Duplicate,
+}
+
+impl InterpolationMethod {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "framerate" => InterpolationMethod::Framerate,
+            "duplicate" => InterpolationMethod::Duplicate,
+            _ => InterpolationMethod::Minterpolate,
+        }
+    }
+}
+
+/// Convert video using specified interpolation method
 pub async fn convert_video_minterpolate<F>(
     input_path: &str,
     output_path: &str,
@@ -252,18 +273,41 @@ pub async fn convert_video_minterpolate<F>(
     use_hw_accel: bool,
     use_hevc: bool,
     quality_preset: Option<&str>,
+    interpolation_method: Option<&str>,
     cancel_flag: Arc<AtomicBool>,
     progress_callback: F,
 ) -> Result<f64, String>
 where
     F: Fn(ProgressEvent) + Send + 'static,
 {
-    // Build minterpolate filter string with thread optimization
-    // minterpolate is CPU-intensive, use all available threads
-    let filter = format!(
-        "minterpolate=fps={}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1",
-        target_fps
-    );
+    let method = interpolation_method
+        .map(InterpolationMethod::from_str)
+        .unwrap_or(InterpolationMethod::Minterpolate);
+
+    // Build filter string based on interpolation method
+    let filter = match method {
+        InterpolationMethod::Minterpolate => {
+            // Motion Compensated Interpolation - highest quality
+            log::info!("Using minterpolate filter (highest quality, slowest)");
+            format!(
+                "minterpolate=fps={}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1",
+                target_fps
+            )
+        }
+        InterpolationMethod::Framerate => {
+            // Frame blending - balanced
+            log::info!("Using framerate filter (balanced quality and speed)");
+            format!(
+                "framerate=fps={}:interp_start=0:interp_end=255:scene=8.2",
+                target_fps
+            )
+        }
+        InterpolationMethod::Duplicate => {
+            // Simple frame duplication - fastest
+            log::info!("Using fps filter (fastest, frame duplication)");
+            format!("fps={}", target_fps)
+        }
+    };
 
     // Build ffmpeg arguments
     let mut args = vec![

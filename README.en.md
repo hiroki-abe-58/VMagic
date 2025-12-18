@@ -77,16 +77,44 @@ npm run tauri:build
 6. Conversion status for each file is displayed in real-time
 7. Cancel anytime if needed
 
-## ffmpeg Command Used
+## Frame Interpolation Methods
 
+Choose from 3 interpolation methods:
+
+### 1. High Quality (minterpolate)
 ```bash
 ffmpeg -i input.mp4 \
   -filter:v "minterpolate=fps={target_fps}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1" \
-  -c:a copy \
-  output.mp4
+  -c:a copy output.mp4
 ```
+- **Quality**: Highest
+- **Speed**: Slow (CPU intensive)
+- **Features**: Motion-compensated smooth frame generation
+- **Use case**: Quality-focused final output
 
-### Minterpolate Parameters
+### 2. Balanced (framerate)
+```bash
+ffmpeg -i input.mp4 \
+  -filter:v "framerate=fps={target_fps}:interp_start=0:interp_end=255:scene=8.2" \
+  -c:a copy output.mp4
+```
+- **Quality**: Medium
+- **Speed**: Fast
+- **Features**: Frame blending interpolation
+- **Use case**: Balance between speed and quality
+
+### 3. Fast (duplicate)
+```bash
+ffmpeg -i input.mp4 \
+  -filter:v "fps={target_fps}" \
+  -c:a copy output.mp4
+```
+- **Quality**: Low
+- **Speed**: Fastest
+- **Features**: Simple frame duplication/dropping
+- **Use case**: Preview, quick processing
+
+### Minterpolate Parameters Detail
 
 - `fps`: Target frame rate
 - `mi_mode=mci`: Motion Compensated Interpolation

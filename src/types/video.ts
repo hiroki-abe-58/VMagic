@@ -25,6 +25,9 @@ export interface FFmpegStatus {
 // Quality preset options
 export type QualityPreset = 'fast' | 'balanced' | 'quality';
 
+// Interpolation method options
+export type InterpolationMethod = 'minterpolate' | 'framerate' | 'duplicate';
+
 // Conversion progress event
 export interface ProgressEvent {
     progress: number;
