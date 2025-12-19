@@ -35,6 +35,43 @@ export type InterpolationMethod = 'minterpolate' | 'framerate' | 'duplicate' | '
 // Output format options
 export type OutputFormat = 'mp4' | 'mov' | 'webm' | 'mkv';
 
+// Audio output format options
+export type AudioOutputFormat = 'wav' | 'mp3' | 'aac' | 'flac' | 'ogg';
+
+// Audio quality preset
+export type AudioQuality = 'low' | 'medium' | 'high' | 'lossless';
+
+// Audio info returned from ffprobe
+export interface AudioInfo {
+    path: string;
+    filename: string;
+    duration: number;
+    sample_rate: number;
+    channels: number;
+    codec: string;
+    bitrate: number | null;
+    file_size: number;
+}
+
+// Audio processing settings
+export interface AudioPaddingSettings {
+    paddingBefore: number;  // seconds (0.01 unit)
+    paddingAfter: number;   // seconds (0.01 unit)
+    outputFormat: AudioOutputFormat;
+    quality: AudioQuality;
+}
+
+// Audio processing result
+export interface AudioProcessingResult {
+    success: boolean;
+    output_path: string;
+    input_duration: number;
+    output_duration: number;
+    padding_before: number;
+    padding_after: number;
+    message: string;
+}
+
 // Upscale model options
 export type UpscaleModel = 'realesrgan-x4plus' | 'realesrgan-x4plus-anime' | 'realesr-animevideov3';
 

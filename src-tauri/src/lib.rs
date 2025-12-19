@@ -28,6 +28,8 @@ pub fn run() {
             compress_video,
             cancel_conversion,
             select_output_directory,
+            get_audio_info,
+            process_audio,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

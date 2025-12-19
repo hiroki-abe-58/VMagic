@@ -1,4 +1,4 @@
-use crate::ffmpeg::{self, VideoInfo};
+use crate::ffmpeg::{self, AudioInfo, VideoInfo};
 use crate::validation;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -414,5 +414,109 @@ pub async fn compress_video(
 #[tauri::command]
 pub async fn select_output_directory() -> Result<Option<String>, String> {
     Ok(None)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AudioProcessingResult {
+    pub success: bool,
+    pub output_path: String,
+    pub input_duration: f64,
+    pub output_duration: f64,
+    pub padding_before: f64,
+    pub padding_after: f64,
+    pub message: String,
+}
+
+/// Get audio information using ffprobe
+#[tauri::command]
+pub async fn get_audio_info(path: String) -> Result<AudioInfo, String> {
+    ffmpeg::get_audio_info(&path).await
+}
+
+/// Process audio with padding (silence before/after)
+#[tauri::command]
+pub async fn process_audio(
+    app: AppHandle,
+    input_path: String,
+    output_path: String,
+    padding_before: f64,
+    padding_after: f64,
+    output_format: String,
+    quality: String,
+    state: State<'_, ConversionState>,
+) -> Result<AudioProcessingResult, String> {
+    // Check if already converting
+    {
+        let mut is_converting = state.is_converting.lock().await;
+        if *is_converting {
+            return Err("変換処理が既に実行中です".to_string());
+        }
+        *is_converting = true;
+    }
+
+    // Reset cancel flag
+    state.cancel_flag.store(false, Ordering::SeqCst);
+
+    let cancel_flag = state.cancel_flag.clone();
+    let is_converting = state.is_converting.clone();
+
+    // Get input audio info
+    let input_info = ffmpeg::get_audio_info(&input_path).await?;
+    let input_duration = input_info.duration;
+
+    // Run audio processing
+    let result = ffmpeg::process_audio_with_padding(
+        &input_path,
+        &output_path,
+        padding_before,
+        padding_after,
+        &output_format,
+        &quality,
+        cancel_flag,
+        move |progress| {
+            let _ = app.emit("conversion-progress", progress);
+        },
+    )
+    .await;
+
+    // Reset converting flag
+    {
+        let mut converting = is_converting.lock().await;
+        *converting = false;
+    }
+
+    match result {
+        Ok(output_duration) => {
+            let message = format!(
+                "音声処理完了: {:.2}秒 + 前{:.2}秒 + 後{:.2}秒 = {:.2}秒",
+                input_duration, padding_before, padding_after, output_duration
+            );
+
+            Ok(AudioProcessingResult {
+                success: true,
+                output_path,
+                input_duration,
+                output_duration,
+                padding_before,
+                padding_after,
+                message,
+            })
+        }
+        Err(e) => {
+            if e.contains("cancelled") || e.contains("キャンセル") {
+                Ok(AudioProcessingResult {
+                    success: false,
+                    output_path,
+                    input_duration,
+                    output_duration: 0.0,
+                    padding_before,
+                    padding_after,
+                    message: "処理がキャンセルされました".to_string(),
+                })
+            } else {
+                Err(e)
+            }
+        }
+    }
 }
 

@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import type { VideoInfo, FFmpegStatus, ConversionResult, ProgressEvent } from '../types/video';
+import type { VideoInfo, FFmpegStatus, ConversionResult, ProgressEvent, AudioInfo, AudioProcessingResult } from '../types/video';
 
 // Check if ffmpeg is available
 export async function checkFfmpeg(): Promise<FFmpegStatus> {
@@ -15,25 +15,25 @@ export async function getVideoInfo(path: string): Promise<VideoInfo> {
 
 // Convert video with specified interpolation method
 export async function convertVideo(
-  inputPath: string,
-  outputPath: string,
-  targetFps: number,
-  useHwAccel: boolean = true,
-  useHevc: boolean = false,
-  qualityPreset: string = 'balanced',
-  interpolationMethod: string = 'minterpolate',
-  outputFormat: string = 'mp4'
+    inputPath: string,
+    outputPath: string,
+    targetFps: number,
+    useHwAccel: boolean = true,
+    useHevc: boolean = false,
+    qualityPreset: string = 'balanced',
+    interpolationMethod: string = 'minterpolate',
+    outputFormat: string = 'mp4'
 ): Promise<ConversionResult> {
-  return invoke<ConversionResult>('convert_video', {
-    inputPath,
-    outputPath,
-    targetFps,
-    useHwAccel,
-    useHevc,
-    qualityPreset,
-    interpolationMethod,
-    outputFormat,
-  });
+    return invoke<ConversionResult>('convert_video', {
+        inputPath,
+        outputPath,
+        targetFps,
+        useHwAccel,
+        useHevc,
+        qualityPreset,
+        interpolationMethod,
+        outputFormat,
+    });
 }
 
 // Cancel ongoing conversion
@@ -43,46 +43,46 @@ export async function cancelConversion(): Promise<void> {
 
 // Upscale video using Real-ESRGAN AI
 export async function upscaleVideo(
-  inputPath: string,
-  outputPath: string,
-  scaleFactor: number = 4,
-  modelName: string = 'realesrgan-x4plus',
-  useHwAccel: boolean = true,
-  useHevc: boolean = false,
-  qualityPreset: string = 'balanced',
-  outputFormat: string = 'mp4'
+    inputPath: string,
+    outputPath: string,
+    scaleFactor: number = 4,
+    modelName: string = 'realesrgan-x4plus',
+    useHwAccel: boolean = true,
+    useHevc: boolean = false,
+    qualityPreset: string = 'balanced',
+    outputFormat: string = 'mp4'
 ): Promise<ConversionResult> {
-  return invoke<ConversionResult>('upscale_video', {
-    inputPath,
-    outputPath,
-    scaleFactor,
-    modelName,
-    useHwAccel,
-    useHevc,
-    qualityPreset,
-    outputFormat,
-  });
+    return invoke<ConversionResult>('upscale_video', {
+        inputPath,
+        outputPath,
+        scaleFactor,
+        modelName,
+        useHwAccel,
+        useHevc,
+        qualityPreset,
+        outputFormat,
+    });
 }
 
 // Compress video to target file size
 export async function compressVideo(
-  inputPath: string,
-  outputPath: string,
-  targetSizeMb: number,
-  targetWidth: number | null = null,
-  targetHeight: number | null = null,
-  useHwAccel: boolean = true,
-  outputFormat: string = 'mp4'
+    inputPath: string,
+    outputPath: string,
+    targetSizeMb: number,
+    targetWidth: number | null = null,
+    targetHeight: number | null = null,
+    useHwAccel: boolean = true,
+    outputFormat: string = 'mp4'
 ): Promise<ConversionResult> {
-  return invoke<ConversionResult>('compress_video', {
-    inputPath,
-    outputPath,
-    targetSizeMb,
-    targetWidth,
-    targetHeight,
-    useHwAccel,
-    outputFormat,
-  });
+    return invoke<ConversionResult>('compress_video', {
+        inputPath,
+        outputPath,
+        targetSizeMb,
+        targetWidth,
+        targetHeight,
+        useHwAccel,
+        outputFormat,
+    });
 }
 
 // Subscribe to conversion progress events
@@ -91,6 +91,30 @@ export async function subscribeToProgress(
 ): Promise<UnlistenFn> {
     return listen<ProgressEvent>('conversion-progress', (event) => {
         callback(event.payload);
+    });
+}
+
+// Get audio information
+export async function getAudioInfo(path: string): Promise<AudioInfo> {
+    return invoke<AudioInfo>('get_audio_info', { path });
+}
+
+// Process audio with padding (silence before/after)
+export async function processAudio(
+    inputPath: string,
+    outputPath: string,
+    paddingBefore: number,
+    paddingAfter: number,
+    outputFormat: string,
+    quality: string
+): Promise<AudioProcessingResult> {
+    return invoke<AudioProcessingResult>('process_audio', {
+        inputPath,
+        outputPath,
+        paddingBefore,
+        paddingAfter,
+        outputFormat,
+        quality,
     });
 }
 
@@ -108,6 +132,45 @@ export async function selectVideoFile(): Promise<string | null> {
 
     if (typeof result === 'string') {
         return result;
+    }
+    return null;
+}
+
+// Open file dialog for audio selection
+export async function selectAudioFile(): Promise<string | null> {
+    const result = await open({
+        multiple: false,
+        filters: [
+            {
+                name: '音声ファイル',
+                extensions: ['mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma', 'aiff', 'opus'],
+            },
+        ],
+    });
+
+    if (typeof result === 'string') {
+        return result;
+    }
+    return null;
+}
+
+// Open file dialog for multiple audio files selection
+export async function selectAudioFiles(): Promise<string[] | null> {
+    const result = await open({
+        multiple: true,
+        filters: [
+            {
+                name: '音声ファイル',
+                extensions: ['mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma', 'aiff', 'opus'],
+            },
+        ],
+    });
+
+    if (Array.isArray(result)) {
+        return result;
+    }
+    if (typeof result === 'string') {
+        return [result];
     }
     return null;
 }

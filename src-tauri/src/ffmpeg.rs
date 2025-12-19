@@ -21,6 +21,18 @@ pub struct VideoInfo {
     pub thumbnail: Option<String>, // Base64 encoded JPEG thumbnail
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AudioInfo {
+    pub path: String,
+    pub filename: String,
+    pub duration: f64,
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub codec: String,
+    pub bitrate: Option<u64>,
+    pub file_size: u64,
+}
+
 /// Check if ffmpeg and ffprobe are available on the system
 pub async fn check_ffmpeg_availability() -> Result<FFmpegStatus, String> {
     let ffmpeg_result = Command::new("which").arg("ffmpeg").output().await;
@@ -1431,5 +1443,367 @@ where
         input_path, output_path, output_size as f64 / 1024.0 / 1024.0);
 
     Ok(output_size)
+}
+
+/// Get audio information using ffprobe
+pub async fn get_audio_info(path: &str) -> Result<AudioInfo, String> {
+    // Get file metadata
+    let metadata = std::fs::metadata(path).map_err(|e| format!("ファイルが見つかりません: {}", e))?;
+    let file_size = metadata.len();
+
+    // Extract filename
+    let filename = std::path::Path::new(path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+
+    // Run ffprobe to get audio info as JSON
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            path,
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("ffprobe実行エラー: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "ffprobeエラー: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let json_str = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value =
+        serde_json::from_str(&json_str).map_err(|e| format!("JSON解析エラー: {}", e))?;
+
+    // Find audio stream
+    let streams = json["streams"]
+        .as_array()
+        .ok_or("ストリーム情報が見つかりません")?;
+
+    let audio_stream = streams
+        .iter()
+        .find(|s| s["codec_type"].as_str() == Some("audio"))
+        .ok_or("音声ストリームが見つかりません")?;
+
+    // Extract audio properties
+    let sample_rate = audio_stream["sample_rate"]
+        .as_str()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(44100);
+    
+    let channels = audio_stream["channels"]
+        .as_u64()
+        .unwrap_or(2) as u32;
+    
+    let codec = audio_stream["codec_name"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+
+    // Get duration from format or stream
+    let duration = json["format"]["duration"]
+        .as_str()
+        .and_then(|s| s.parse::<f64>().ok())
+        .or_else(|| {
+            audio_stream["duration"]
+                .as_str()
+                .and_then(|s| s.parse::<f64>().ok())
+        })
+        .unwrap_or(0.0);
+
+    // Get bitrate
+    let bitrate = audio_stream["bit_rate"]
+        .as_str()
+        .and_then(|s| s.parse::<u64>().ok())
+        .or_else(|| {
+            json["format"]["bit_rate"]
+                .as_str()
+                .and_then(|s| s.parse::<u64>().ok())
+        });
+
+    Ok(AudioInfo {
+        path: path.to_string(),
+        filename,
+        duration,
+        sample_rate,
+        channels,
+        codec,
+        bitrate,
+        file_size,
+    })
+}
+
+/// Process audio with padding (silence before/after)
+pub async fn process_audio_with_padding<F>(
+    input_path: &str,
+    output_path: &str,
+    padding_before: f64,  // seconds
+    padding_after: f64,   // seconds
+    output_format: &str,  // wav, mp3, aac, flac, ogg
+    quality: &str,        // low, medium, high, lossless
+    cancel_flag: Arc<AtomicBool>,
+    progress_callback: F,
+) -> Result<f64, String>
+where
+    F: Fn(ProgressEvent) + Send + 'static,
+{
+    log::info!("Starting audio processing: padding before={}s, after={}s, format={}", 
+        padding_before, padding_after, output_format);
+
+    // Get input audio info
+    let input_info = get_audio_info(input_path).await?;
+    let input_duration = input_info.duration;
+    let sample_rate = input_info.sample_rate;
+    let channels = input_info.channels;
+
+    progress_callback(ProgressEvent {
+        progress: 0.0,
+        frame: 0,
+        fps: 0.0,
+        time: "00:00:00.00".to_string(),
+        speed: "処理準備中...".to_string(),
+    });
+
+    // Build filter complex for adding silence
+    // Generate silence before and after, then concatenate
+    let filter_complex = if padding_before > 0.0 || padding_after > 0.0 {
+        let mut parts = Vec::new();
+        let mut inputs = Vec::new();
+
+        // Add silence before
+        if padding_before > 0.0 {
+            parts.push(format!(
+                "aevalsrc=0:d={}:s={}:c={}[silence_before]",
+                padding_before, sample_rate, if channels == 1 { "mono" } else { "stereo" }
+            ));
+            inputs.push("[silence_before]");
+        }
+
+        // Add original audio
+        inputs.push("[0:a]");
+
+        // Add silence after
+        if padding_after > 0.0 {
+            parts.push(format!(
+                "aevalsrc=0:d={}:s={}:c={}[silence_after]",
+                padding_after, sample_rate, if channels == 1 { "mono" } else { "stereo" }
+            ));
+            inputs.push("[silence_after]");
+        }
+
+        // Concatenate all parts
+        let concat_input = inputs.join("");
+        let n = inputs.len();
+        let full_filter = if parts.is_empty() {
+            format!("{}concat=n={}:v=0:a=1[out]", concat_input, n)
+        } else {
+            format!("{};{}concat=n={}:v=0:a=1[out]", parts.join(";"), concat_input, n)
+        };
+
+        full_filter
+    } else {
+        // No padding needed, just pass through
+        "[0:a]acopy[out]".to_string()
+    };
+
+    // Build ffmpeg arguments
+    let mut args = vec![
+        "-y".to_string(),
+        "-i".to_string(),
+        input_path.to_string(),
+        "-filter_complex".to_string(),
+        filter_complex,
+        "-map".to_string(),
+        "[out]".to_string(),
+    ];
+
+    // Add codec settings based on output format and quality
+    match output_format {
+        "wav" => {
+            let codec = match quality {
+                "lossless" => "pcm_s32le",
+                "high" => "pcm_s24le",
+                _ => "pcm_s16le",
+            };
+            args.extend([
+                "-c:a".to_string(),
+                codec.to_string(),
+            ]);
+        }
+        "mp3" => {
+            let bitrate = match quality {
+                "low" => "128k",
+                "medium" => "192k",
+                "high" => "320k",
+                "lossless" => "320k",
+                _ => "192k",
+            };
+            args.extend([
+                "-c:a".to_string(),
+                "libmp3lame".to_string(),
+                "-b:a".to_string(),
+                bitrate.to_string(),
+            ]);
+        }
+        "aac" => {
+            let bitrate = match quality {
+                "low" => "128k",
+                "medium" => "192k",
+                "high" => "256k",
+                "lossless" => "320k",
+                _ => "192k",
+            };
+            args.extend([
+                "-c:a".to_string(),
+                "aac".to_string(),
+                "-b:a".to_string(),
+                bitrate.to_string(),
+            ]);
+        }
+        "flac" => {
+            let compression = match quality {
+                "low" => "5",
+                "medium" => "5",
+                "high" => "8",
+                "lossless" => "12",
+                _ => "5",
+            };
+            args.extend([
+                "-c:a".to_string(),
+                "flac".to_string(),
+                "-compression_level".to_string(),
+                compression.to_string(),
+            ]);
+        }
+        "ogg" => {
+            let quality_val = match quality {
+                "low" => "3",
+                "medium" => "5",
+                "high" => "8",
+                "lossless" => "10",
+                _ => "5",
+            };
+            args.extend([
+                "-c:a".to_string(),
+                "libvorbis".to_string(),
+                "-q:a".to_string(),
+                quality_val.to_string(),
+            ]);
+        }
+        _ => {
+            // Default to wav
+            args.extend([
+                "-c:a".to_string(),
+                "pcm_s16le".to_string(),
+            ]);
+        }
+    }
+
+    // Add progress output
+    args.extend([
+        "-progress".to_string(),
+        "pipe:1".to_string(),
+        "-nostats".to_string(),
+        output_path.to_string(),
+    ]);
+
+    // Spawn ffmpeg process
+    let mut child = Command::new("ffmpeg")
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("ffmpeg起動エラー: {}", e))?;
+
+    let stdout = child.stdout.take().expect("Failed to capture stdout");
+    let stderr = child.stderr.take().expect("Failed to capture stderr");
+
+    let mut stdout_reader = BufReader::new(stdout).lines();
+    let mut stderr_reader = BufReader::new(stderr).lines();
+
+    let time_regex = Regex::new(r"out_time_ms=(\d+)").unwrap();
+
+    let total_duration = input_duration + padding_before + padding_after;
+
+    loop {
+        if cancel_flag.load(Ordering::SeqCst) {
+            let _ = child.kill().await;
+            return Err("処理がキャンセルされました".to_string());
+        }
+
+        tokio::select! {
+            line = stdout_reader.next_line() => {
+                match line {
+                    Ok(Some(text)) => {
+                        if let Some(caps) = time_regex.captures(&text) {
+                            let time_ms: u64 = caps[1].parse().unwrap_or(0);
+                            let current_time = time_ms as f64 / 1_000_000.0;
+                            let progress = if total_duration > 0.0 {
+                                (current_time / total_duration * 100.0).min(100.0)
+                            } else {
+                                0.0
+                            };
+
+                            progress_callback(ProgressEvent {
+                                progress,
+                                frame: 0,
+                                fps: 0.0,
+                                time: format_time(current_time),
+                                speed: "処理中...".to_string(),
+                            });
+                        }
+
+                        if text.contains("progress=end") {
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(_) => break,
+                }
+            }
+            line = stderr_reader.next_line() => {
+                match line {
+                    Ok(Some(text)) => {
+                        log::debug!("ffmpeg stderr: {}", text);
+                    }
+                    Ok(None) => {}
+                    Err(_) => {}
+                }
+            }
+        }
+    }
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("ffmpegプロセスエラー: {}", e))?;
+
+    if !status.success() {
+        return Err(format!("ffmpeg処理失敗 (exit code: {:?})", status.code()));
+    }
+
+    progress_callback(ProgressEvent {
+        progress: 100.0,
+        frame: 0,
+        fps: 0.0,
+        time: format_time(total_duration),
+        speed: "完了".to_string(),
+    });
+
+    // Get output audio duration
+    let output_info = get_audio_info(output_path).await?;
+
+    log::info!("Audio processing complete: {} -> {} ({}s -> {}s)", 
+        input_path, output_path, input_duration, output_info.duration);
+
+    Ok(output_info.duration)
 }
 
