@@ -1,4 +1,4 @@
-use crate::ffmpeg::{self, AudioInfo, VideoInfo};
+use crate::ffmpeg::{self, AudioInfo, MediaDetailInfo, VideoInfo};
 use crate::validation;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -518,5 +518,11 @@ pub async fn process_audio(
             }
         }
     }
+}
+
+/// Get detailed media information (video/audio)
+#[tauri::command]
+pub async fn get_media_detail_info(path: String) -> Result<MediaDetailInfo, String> {
+    ffmpeg::get_media_detail_info(&path).await
 }
 

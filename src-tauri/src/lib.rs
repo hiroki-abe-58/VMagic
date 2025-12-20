@@ -30,6 +30,7 @@ pub fn run() {
             select_output_directory,
             get_audio_info,
             process_audio,
+            get_media_detail_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

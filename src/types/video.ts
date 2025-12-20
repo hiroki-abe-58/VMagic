@@ -72,6 +72,60 @@ export interface AudioProcessingResult {
     message: string;
 }
 
+// Detailed media information (video/audio combined)
+export interface MediaDetailInfo {
+    // File info
+    path: string;
+    filename: string;
+    file_size: number;
+    format_name: string;
+    format_long_name: string;
+
+    // Duration
+    duration: number;
+    start_time: number;
+
+    // Overall bitrate
+    bitrate: number | null;
+
+    // Video stream info (optional)
+    video_codec: string | null;
+    video_codec_long: string | null;
+    video_profile: string | null;
+    video_level: number | null;
+    width: number | null;
+    height: number | null;
+    fps: number | null;
+    video_bitrate: number | null;
+    pixel_format: string | null;
+    color_space: string | null;
+    color_range: string | null;
+    color_primaries: string | null;
+    color_transfer: string | null;
+    aspect_ratio: string | null;
+
+    // Audio stream info (optional)
+    audio_codec: string | null;
+    audio_codec_long: string | null;
+    audio_profile: string | null;
+    sample_rate: number | null;
+    channels: number | null;
+    channel_layout: string | null;
+    audio_bitrate: number | null;
+    bits_per_sample: number | null;
+
+    // Metadata
+    title: string | null;
+    artist: string | null;
+    album: string | null;
+    date: string | null;
+    encoder: string | null;
+    creation_time: string | null;
+
+    // Thumbnail (for video)
+    thumbnail: string | null;
+}
+
 // Upscale model options
 export type UpscaleModel = 'realesrgan-x4plus' | 'realesrgan-x4plus-anime' | 'realesr-animevideov3';
 

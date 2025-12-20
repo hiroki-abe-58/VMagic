@@ -3,13 +3,13 @@ import { VideoDropZone } from './components/VideoDropZone';
 import { FpsSettings } from './components/FpsSettings';
 import { BatchFileList } from './components/BatchFileList';
 import { BatchProgress } from './components/BatchProgress';
-import { checkFfmpeg, getAudioInfo, processAudio, selectAudioFiles, subscribeToProgress } from './lib/tauri-commands';
+import { checkFfmpeg, getAudioInfo, processAudio, selectAudioFiles, subscribeToProgress, getMediaDetailInfo, selectMediaFile, formatFileSize, formatDuration, formatBitrate } from './lib/tauri-commands';
 import { useBatchConvert } from './hooks/useBatchConvert';
 import { DEFAULT_FPS } from './lib/presets';
-import type { FFmpegStatus, QualityPreset, InterpolationMethod, OutputFormat, UpscaleModel, UpscaleScale, TargetResolution, DownscaleResolution, AudioOutputFormat, AudioQuality, AudioInfo, ProgressEvent } from './types/video';
+import type { FFmpegStatus, QualityPreset, InterpolationMethod, OutputFormat, UpscaleModel, UpscaleScale, TargetResolution, DownscaleResolution, AudioOutputFormat, AudioQuality, AudioInfo, ProgressEvent, MediaDetailInfo } from './types/video';
 import { TARGET_RESOLUTIONS, getAvailableResolutions, FILE_SIZE_PRESETS, DOWNSCALE_RESOLUTIONS, getAvailableDownscaleResolutions, calculateTargetBitrate } from './types/video';
 
-type AppMode = 'fps' | 'upscale' | 'compress' | 'audio';
+type AppMode = 'fps' | 'upscale' | 'compress' | 'audio' | 'info';
 
 // Audio file item for batch processing
 interface AudioItem {
@@ -48,6 +48,11 @@ function App() {
     const [audioQuality, setAudioQuality] = useState<AudioQuality>('high');
     const [isAudioProcessing, setIsAudioProcessing] = useState(false);
     const [audioProgress, setAudioProgress] = useState<ProgressEvent | null>(null);
+
+    // Info tab state
+    const [mediaInfo, setMediaInfo] = useState<MediaDetailInfo | null>(null);
+    const [isLoadingInfo, setIsLoadingInfo] = useState(false);
+    const [infoError, setInfoError] = useState<string | null>(null);
 
     const {
         items,
@@ -241,6 +246,30 @@ function App() {
         setAudioProgress(null);
     }, []);
 
+    // Info tab handlers
+    const handleSelectMediaFile = useCallback(async () => {
+        const path = await selectMediaFile();
+        if (!path) return;
+
+        setIsLoadingInfo(true);
+        setInfoError(null);
+        setMediaInfo(null);
+
+        try {
+            const info = await getMediaDetailInfo(path);
+            setMediaInfo(info);
+        } catch (error) {
+            setInfoError(String(error));
+        } finally {
+            setIsLoadingInfo(false);
+        }
+    }, []);
+
+    const handleClearMediaInfo = useCallback(() => {
+        setMediaInfo(null);
+        setInfoError(null);
+    }, []);
+
     const hasFiles = items.length > 0;
     const readyFiles = items.filter(i => i.status === 'ready' || i.status === 'pending');
     const hasCompletedAll = items.length > 0 && items.every(i => i.status === 'completed' || i.status === 'error' || i.status === 'cancelled');
@@ -425,10 +454,30 @@ function App() {
                                 </svg>
                                 音声
                             </button>
+                            <button
+                                onClick={() => setAppMode('info')}
+                                disabled={isProcessing || isAudioProcessing}
+                                className={`
+                  flex-1 py-3 px-4 rounded-lg font-medium transition-all duration-200
+                  flex items-center justify-center gap-2
+                  ${appMode === 'info'
+                                        ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
+                                        : 'text-text-secondary hover:text-text-primary hover:bg-dark-surface-light'
+                                    }
+                  ${(isProcessing || isAudioProcessing) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                `}
+                            >
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                    />
+                                </svg>
+                                情報
+                            </button>
                         </div>
 
                         {/* Video Drop Zone - for video modes only */}
-                        {appMode !== 'audio' && (
+                        {appMode !== 'audio' && appMode !== 'info' && (
                             <VideoDropZone
                                 onFilesSelected={handleFilesSelected}
                                 isDisabled={!ffmpegStatus?.available || isProcessing}
@@ -437,7 +486,7 @@ function App() {
                         )}
 
                         {/* Batch File List - for video modes only */}
-                        {appMode !== 'audio' && hasFiles && (
+                        {appMode !== 'audio' && appMode !== 'info' && hasFiles && (
                             <BatchFileList
                                 items={items}
                                 onRemove={removeFile}
@@ -1609,8 +1658,276 @@ function App() {
                             </div>
                         )}
 
+                        {/* Media Info Viewer - only in Info mode */}
+                        {appMode === 'info' && (
+                            <div className="space-y-6">
+                                {/* File Select Zone */}
+                                <div
+                                    onClick={handleSelectMediaFile}
+                                    className={`
+                    p-8 border-2 border-dashed rounded-xl text-center cursor-pointer transition-all duration-200
+                    ${isLoadingInfo
+                                            ? 'border-dark-border bg-dark-surface opacity-50 cursor-wait'
+                                            : 'border-dark-border hover:border-indigo-500 bg-dark-surface hover:bg-dark-surface-light'
+                                        }
+                  `}
+                                >
+                                    <div className="flex flex-col items-center gap-4">
+                                        <div className="w-16 h-16 rounded-full bg-indigo-500/10 flex items-center justify-center">
+                                            {isLoadingInfo ? (
+                                                <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                                            ) : (
+                                                <svg className="w-8 h-8 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                                    />
+                                                </svg>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <p className="text-text-primary font-medium">
+                                                {isLoadingInfo ? '読み込み中...' : mediaInfo ? mediaInfo.filename : 'メディアファイルを選択'}
+                                            </p>
+                                            <p className="text-text-muted text-sm mt-1">
+                                                動画・音声ファイルの詳細情報を表示
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Error Display */}
+                                {infoError && (
+                                    <div className="p-4 bg-error/10 border border-error/30 rounded-xl">
+                                        <p className="text-error text-sm">{infoError}</p>
+                                    </div>
+                                )}
+
+                                {/* Media Info Display */}
+                                {mediaInfo && (
+                                    <div className="space-y-4">
+                                        {/* Thumbnail and Basic Info */}
+                                        <div className="bg-dark-surface rounded-xl p-6 border border-dark-border">
+                                            <div className="flex gap-6">
+                                                {/* Thumbnail */}
+                                                {mediaInfo.thumbnail && (
+                                                    <div className="flex-shrink-0">
+                                                        <img
+                                                            src={mediaInfo.thumbnail}
+                                                            alt="Thumbnail"
+                                                            className="w-48 h-auto rounded-lg object-cover"
+                                                        />
+                                                    </div>
+                                                )}
+                                                {/* Basic Info */}
+                                                <div className="flex-1 space-y-3">
+                                                    <h2 className="text-lg font-semibold text-text-primary truncate">
+                                                        {mediaInfo.filename}
+                                                    </h2>
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <div>
+                                                            <span className="text-text-muted text-xs">フォーマット</span>
+                                                            <p className="text-text-primary font-medium">{mediaInfo.format_long_name}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-text-muted text-xs">ファイルサイズ</span>
+                                                            <p className="text-text-primary font-medium">{formatFileSize(mediaInfo.file_size)}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-text-muted text-xs">総尺</span>
+                                                            <p className="text-text-primary font-medium">{formatDuration(mediaInfo.duration)}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-text-muted text-xs">ビットレート</span>
+                                                            <p className="text-text-primary font-medium">{formatBitrate(mediaInfo.bitrate ?? null)}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Video Stream Info */}
+                                        {mediaInfo.video_codec && (
+                                            <div className="bg-dark-surface rounded-xl p-6 border border-dark-border">
+                                                <h3 className="text-md font-semibold text-text-primary mb-4 flex items-center gap-2">
+                                                    <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                            d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                                        />
+                                                    </svg>
+                                                    映像ストリーム
+                                                </h3>
+                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                                    <div className="bg-dark-bg rounded-lg p-3">
+                                                        <span className="text-text-muted text-xs block">コーデック</span>
+                                                        <p className="text-text-primary font-mono text-sm">{mediaInfo.video_codec}</p>
+                                                        {mediaInfo.video_profile && (
+                                                            <p className="text-text-muted text-xs">{mediaInfo.video_profile}</p>
+                                                        )}
+                                                    </div>
+                                                    <div className="bg-dark-bg rounded-lg p-3">
+                                                        <span className="text-text-muted text-xs block">解像度</span>
+                                                        <p className="text-text-primary font-mono text-sm">{mediaInfo.width}x{mediaInfo.height}</p>
+                                                        {mediaInfo.aspect_ratio && (
+                                                            <p className="text-text-muted text-xs">アスペクト比: {mediaInfo.aspect_ratio}</p>
+                                                        )}
+                                                    </div>
+                                                    <div className="bg-dark-bg rounded-lg p-3">
+                                                        <span className="text-text-muted text-xs block">フレームレート</span>
+                                                        <p className="text-text-primary font-mono text-sm">{mediaInfo.fps?.toFixed(2)} fps</p>
+                                                    </div>
+                                                    <div className="bg-dark-bg rounded-lg p-3">
+                                                        <span className="text-text-muted text-xs block">ビットレート</span>
+                                                        <p className="text-text-primary font-mono text-sm">{formatBitrate(mediaInfo.video_bitrate ?? null)}</p>
+                                                    </div>
+                                                    <div className="bg-dark-bg rounded-lg p-3">
+                                                        <span className="text-text-muted text-xs block">ピクセル形式</span>
+                                                        <p className="text-text-primary font-mono text-sm">{mediaInfo.pixel_format || '不明'}</p>
+                                                    </div>
+                                                    {mediaInfo.color_space && (
+                                                        <div className="bg-dark-bg rounded-lg p-3">
+                                                            <span className="text-text-muted text-xs block">色空間</span>
+                                                            <p className="text-text-primary font-mono text-sm">{mediaInfo.color_space}</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Audio Stream Info */}
+                                        {mediaInfo.audio_codec && (
+                                            <div className="bg-dark-surface rounded-xl p-6 border border-dark-border">
+                                                <h3 className="text-md font-semibold text-text-primary mb-4 flex items-center gap-2">
+                                                    <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                            d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                                                        />
+                                                    </svg>
+                                                    音声ストリーム
+                                                </h3>
+                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                                    <div className="bg-dark-bg rounded-lg p-3">
+                                                        <span className="text-text-muted text-xs block">コーデック</span>
+                                                        <p className="text-text-primary font-mono text-sm">{mediaInfo.audio_codec}</p>
+                                                        {mediaInfo.audio_profile && (
+                                                            <p className="text-text-muted text-xs">{mediaInfo.audio_profile}</p>
+                                                        )}
+                                                    </div>
+                                                    <div className="bg-dark-bg rounded-lg p-3">
+                                                        <span className="text-text-muted text-xs block">サンプルレート</span>
+                                                        <p className="text-text-primary font-mono text-sm">{mediaInfo.sample_rate ? `${mediaInfo.sample_rate} Hz` : '不明'}</p>
+                                                    </div>
+                                                    <div className="bg-dark-bg rounded-lg p-3">
+                                                        <span className="text-text-muted text-xs block">チャンネル</span>
+                                                        <p className="text-text-primary font-mono text-sm">
+                                                            {mediaInfo.channels}ch {mediaInfo.channel_layout ? `(${mediaInfo.channel_layout})` : ''}
+                                                        </p>
+                                                    </div>
+                                                    <div className="bg-dark-bg rounded-lg p-3">
+                                                        <span className="text-text-muted text-xs block">ビットレート</span>
+                                                        <p className="text-text-primary font-mono text-sm">{formatBitrate(mediaInfo.audio_bitrate ?? null)}</p>
+                                                    </div>
+                                                    {mediaInfo.bits_per_sample && (
+                                                        <div className="bg-dark-bg rounded-lg p-3">
+                                                            <span className="text-text-muted text-xs block">ビット深度</span>
+                                                            <p className="text-text-primary font-mono text-sm">{mediaInfo.bits_per_sample} bit</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Metadata */}
+                                        {(mediaInfo.title || mediaInfo.artist || mediaInfo.album || mediaInfo.encoder || mediaInfo.creation_time) && (
+                                            <div className="bg-dark-surface rounded-xl p-6 border border-dark-border">
+                                                <h3 className="text-md font-semibold text-text-primary mb-4 flex items-center gap-2">
+                                                    <svg className="w-5 h-5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                            d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                                                        />
+                                                    </svg>
+                                                    メタデータ
+                                                </h3>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    {mediaInfo.title && (
+                                                        <div className="bg-dark-bg rounded-lg p-3">
+                                                            <span className="text-text-muted text-xs block">タイトル</span>
+                                                            <p className="text-text-primary text-sm">{mediaInfo.title}</p>
+                                                        </div>
+                                                    )}
+                                                    {mediaInfo.artist && (
+                                                        <div className="bg-dark-bg rounded-lg p-3">
+                                                            <span className="text-text-muted text-xs block">アーティスト</span>
+                                                            <p className="text-text-primary text-sm">{mediaInfo.artist}</p>
+                                                        </div>
+                                                    )}
+                                                    {mediaInfo.album && (
+                                                        <div className="bg-dark-bg rounded-lg p-3">
+                                                            <span className="text-text-muted text-xs block">アルバム</span>
+                                                            <p className="text-text-primary text-sm">{mediaInfo.album}</p>
+                                                        </div>
+                                                    )}
+                                                    {mediaInfo.date && (
+                                                        <div className="bg-dark-bg rounded-lg p-3">
+                                                            <span className="text-text-muted text-xs block">日付</span>
+                                                            <p className="text-text-primary text-sm">{mediaInfo.date}</p>
+                                                        </div>
+                                                    )}
+                                                    {mediaInfo.encoder && (
+                                                        <div className="bg-dark-bg rounded-lg p-3">
+                                                            <span className="text-text-muted text-xs block">エンコーダー</span>
+                                                            <p className="text-text-primary text-sm">{mediaInfo.encoder}</p>
+                                                        </div>
+                                                    )}
+                                                    {mediaInfo.creation_time && (
+                                                        <div className="bg-dark-bg rounded-lg p-3">
+                                                            <span className="text-text-muted text-xs block">作成日時</span>
+                                                            <p className="text-text-primary text-sm">{mediaInfo.creation_time}</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* File Path */}
+                                        <div className="bg-dark-surface rounded-xl p-4 border border-dark-border">
+                                            <span className="text-text-muted text-xs block mb-1">ファイルパス</span>
+                                            <p className="text-text-primary text-sm font-mono break-all">{mediaInfo.path}</p>
+                                        </div>
+
+                                        {/* Clear Button */}
+                                        <button
+                                            onClick={handleClearMediaInfo}
+                                            className="w-full py-3 px-6 rounded-xl font-semibold
+                               bg-dark-surface-light text-text-secondary border border-dark-border
+                               hover:border-indigo-500/50 hover:text-indigo-400 transition-all duration-300
+                               flex items-center justify-center gap-2"
+                                        >
+                                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                                />
+                                            </svg>
+                                            クリア
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Empty State for Info */}
+                                {!mediaInfo && !isLoadingInfo && !infoError && ffmpegStatus?.available && (
+                                    <div className="text-center py-8">
+                                        <p className="text-text-muted">
+                                            動画や音声ファイルを選択して、詳細情報を確認しましょう
+                                        </p>
+                                        <p className="text-text-muted text-sm mt-2">
+                                            コーデック、ビットレート、解像度、メタデータなどを表示します
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         {/* Batch Progress - for video modes only */}
-                        {appMode !== 'audio' && (
+                        {appMode !== 'audio' && appMode !== 'info' && (
                             <BatchProgress
                                 progress={batchProgress}
                                 isProcessing={isProcessing}
@@ -1618,7 +1935,7 @@ function App() {
                         )}
 
                         {/* Action Buttons - for video modes only */}
-                        {appMode !== 'audio' && hasFiles && (
+                        {appMode !== 'audio' && appMode !== 'info' && hasFiles && (
                             <div className="flex gap-4">
                                 {hasCompletedAll ? (
                                     <button
@@ -1695,7 +2012,7 @@ function App() {
                         )}
 
                         {/* Empty State - for video modes only */}
-                        {appMode !== 'audio' && !hasFiles && ffmpegStatus?.available && (
+                        {appMode !== 'audio' && appMode !== 'info' && !hasFiles && ffmpegStatus?.available && (
                             <div className="text-center py-8">
                                 <p className="text-text-muted">
                                     動画ファイルをドロップまたは選択して、フレームレート変換を開始してください

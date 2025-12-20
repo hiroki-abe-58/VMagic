@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import type { VideoInfo, FFmpegStatus, ConversionResult, ProgressEvent, AudioInfo, AudioProcessingResult } from '../types/video';
+import type { VideoInfo, FFmpegStatus, ConversionResult, ProgressEvent, AudioInfo, AudioProcessingResult, MediaDetailInfo } from '../types/video';
 
 // Check if ffmpeg is available
 export async function checkFfmpeg(): Promise<FFmpegStatus> {
@@ -118,6 +118,11 @@ export async function processAudio(
     });
 }
 
+// Get detailed media information (video/audio)
+export async function getMediaDetailInfo(path: string): Promise<MediaDetailInfo> {
+    return invoke<MediaDetailInfo>('get_media_detail_info', { path });
+}
+
 // Open file dialog for video selection
 export async function selectVideoFile(): Promise<string | null> {
     const result = await open({
@@ -171,6 +176,24 @@ export async function selectAudioFiles(): Promise<string[] | null> {
     }
     if (typeof result === 'string') {
         return [result];
+    }
+    return null;
+}
+
+// Open file dialog for media file selection (video or audio)
+export async function selectMediaFile(): Promise<string | null> {
+    const result = await open({
+        multiple: false,
+        filters: [
+            {
+                name: 'メディアファイル',
+                extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'm4v', 'wmv', 'mpg', 'mpeg', 'mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma', 'aiff', 'opus'],
+            },
+        ],
+    });
+
+    if (typeof result === 'string') {
+        return result;
     }
     return null;
 }

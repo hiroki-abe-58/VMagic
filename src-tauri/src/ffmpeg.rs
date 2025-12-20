@@ -33,6 +33,60 @@ pub struct AudioInfo {
     pub file_size: u64,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MediaDetailInfo {
+    // File info
+    pub path: String,
+    pub filename: String,
+    pub file_size: u64,
+    pub format_name: String,
+    pub format_long_name: String,
+    
+    // Duration
+    pub duration: f64,
+    pub start_time: f64,
+    
+    // Overall bitrate
+    pub bitrate: Option<u64>,
+    
+    // Video stream info (optional)
+    pub video_codec: Option<String>,
+    pub video_codec_long: Option<String>,
+    pub video_profile: Option<String>,
+    pub video_level: Option<i32>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub fps: Option<f64>,
+    pub video_bitrate: Option<u64>,
+    pub pixel_format: Option<String>,
+    pub color_space: Option<String>,
+    pub color_range: Option<String>,
+    pub color_primaries: Option<String>,
+    pub color_transfer: Option<String>,
+    pub aspect_ratio: Option<String>,
+    
+    // Audio stream info (optional)
+    pub audio_codec: Option<String>,
+    pub audio_codec_long: Option<String>,
+    pub audio_profile: Option<String>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u32>,
+    pub channel_layout: Option<String>,
+    pub audio_bitrate: Option<u64>,
+    pub bits_per_sample: Option<u32>,
+    
+    // Metadata
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub date: Option<String>,
+    pub encoder: Option<String>,
+    pub creation_time: Option<String>,
+    
+    // Thumbnail (for video)
+    pub thumbnail: Option<String>,
+}
+
 /// Check if ffmpeg and ffprobe are available on the system
 pub async fn check_ffmpeg_availability() -> Result<FFmpegStatus, String> {
     let ffmpeg_result = Command::new("which").arg("ffmpeg").output().await;
@@ -1805,5 +1859,227 @@ where
         input_path, output_path, input_duration, output_info.duration);
 
     Ok(output_info.duration)
+}
+
+/// Get detailed media information using ffprobe
+pub async fn get_media_detail_info(path: &str) -> Result<MediaDetailInfo, String> {
+    // Get file metadata
+    let metadata = std::fs::metadata(path).map_err(|e| format!("ファイルが見つかりません: {}", e))?;
+    let file_size = metadata.len();
+
+    // Extract filename
+    let filename = std::path::Path::new(path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+
+    // Run ffprobe to get detailed info as JSON
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            path,
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("ffprobe実行エラー: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "ffprobeエラー: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let json_str = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value =
+        serde_json::from_str(&json_str).map_err(|e| format!("JSON解析エラー: {}", e))?;
+
+    // Parse format info
+    let format = &json["format"];
+    let format_name = format["format_name"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let format_long_name = format["format_long_name"]
+        .as_str()
+        .unwrap_or("Unknown format")
+        .to_string();
+    
+    let duration = format["duration"]
+        .as_str()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    
+    let start_time = format["start_time"]
+        .as_str()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    
+    let bitrate = format["bit_rate"]
+        .as_str()
+        .and_then(|s| s.parse::<u64>().ok());
+
+    // Parse tags/metadata from format
+    let tags = &format["tags"];
+    let title = tags["title"].as_str().map(|s| s.to_string());
+    let artist = tags["artist"]
+        .as_str()
+        .or_else(|| tags["ARTIST"].as_str())
+        .map(|s| s.to_string());
+    let album = tags["album"]
+        .as_str()
+        .or_else(|| tags["ALBUM"].as_str())
+        .map(|s| s.to_string());
+    let date = tags["date"]
+        .as_str()
+        .or_else(|| tags["DATE"].as_str())
+        .or_else(|| tags["creation_time"].as_str())
+        .map(|s| s.to_string());
+    let encoder = tags["encoder"]
+        .as_str()
+        .or_else(|| tags["ENCODER"].as_str())
+        .map(|s| s.to_string());
+    let creation_time = tags["creation_time"]
+        .as_str()
+        .map(|s| s.to_string());
+
+    // Find streams
+    let streams = json["streams"]
+        .as_array()
+        .ok_or("ストリーム情報が見つかりません")?;
+
+    let video_stream = streams
+        .iter()
+        .find(|s| s["codec_type"].as_str() == Some("video"));
+
+    let audio_stream = streams
+        .iter()
+        .find(|s| s["codec_type"].as_str() == Some("audio"));
+
+    // Parse video stream info
+    let (
+        video_codec,
+        video_codec_long,
+        video_profile,
+        video_level,
+        width,
+        height,
+        fps,
+        video_bitrate,
+        pixel_format,
+        color_space,
+        color_range,
+        color_primaries,
+        color_transfer,
+        aspect_ratio,
+    ) = if let Some(vs) = video_stream {
+        (
+            vs["codec_name"].as_str().map(|s| s.to_string()),
+            vs["codec_long_name"].as_str().map(|s| s.to_string()),
+            vs["profile"].as_str().map(|s| s.to_string()),
+            vs["level"].as_i64().map(|l| l as i32),
+            vs["width"].as_u64().map(|w| w as u32),
+            vs["height"].as_u64().map(|h| h as u32),
+            vs["r_frame_rate"]
+                .as_str()
+                .or_else(|| vs["avg_frame_rate"].as_str())
+                .map(|s| parse_frame_rate(s)),
+            vs["bit_rate"]
+                .as_str()
+                .and_then(|s| s.parse::<u64>().ok()),
+            vs["pix_fmt"].as_str().map(|s| s.to_string()),
+            vs["color_space"].as_str().map(|s| s.to_string()),
+            vs["color_range"].as_str().map(|s| s.to_string()),
+            vs["color_primaries"].as_str().map(|s| s.to_string()),
+            vs["color_transfer"].as_str().map(|s| s.to_string()),
+            vs["display_aspect_ratio"]
+                .as_str()
+                .or_else(|| vs["sample_aspect_ratio"].as_str())
+                .map(|s| s.to_string()),
+        )
+    } else {
+        (None, None, None, None, None, None, None, None, None, None, None, None, None, None)
+    };
+
+    // Parse audio stream info
+    let (
+        audio_codec,
+        audio_codec_long,
+        audio_profile,
+        sample_rate,
+        channels,
+        channel_layout,
+        audio_bitrate,
+        bits_per_sample,
+    ) = if let Some(aus) = audio_stream {
+        (
+            aus["codec_name"].as_str().map(|s| s.to_string()),
+            aus["codec_long_name"].as_str().map(|s| s.to_string()),
+            aus["profile"].as_str().map(|s| s.to_string()),
+            aus["sample_rate"]
+                .as_str()
+                .and_then(|s| s.parse::<u32>().ok()),
+            aus["channels"].as_u64().map(|c| c as u32),
+            aus["channel_layout"].as_str().map(|s| s.to_string()),
+            aus["bit_rate"]
+                .as_str()
+                .and_then(|s| s.parse::<u64>().ok()),
+            aus["bits_per_sample"].as_u64().map(|b| b as u32),
+        )
+    } else {
+        (None, None, None, None, None, None, None, None)
+    };
+
+    // Generate thumbnail for video
+    let thumbnail = if video_stream.is_some() {
+        generate_thumbnail(path, duration).await.ok()
+    } else {
+        None
+    };
+
+    Ok(MediaDetailInfo {
+        path: path.to_string(),
+        filename,
+        file_size,
+        format_name,
+        format_long_name,
+        duration,
+        start_time,
+        bitrate,
+        video_codec,
+        video_codec_long,
+        video_profile,
+        video_level,
+        width,
+        height,
+        fps,
+        video_bitrate,
+        pixel_format,
+        color_space,
+        color_range,
+        color_primaries,
+        color_transfer,
+        aspect_ratio,
+        audio_codec,
+        audio_codec_long,
+        audio_profile,
+        sample_rate,
+        channels,
+        channel_layout,
+        audio_bitrate,
+        bits_per_sample,
+        title,
+        artist,
+        album,
+        date,
+        encoder,
+        creation_time,
+        thumbnail,
+    })
 }
 
