@@ -53,6 +53,7 @@ function App() {
     const [mediaInfo, setMediaInfo] = useState<MediaDetailInfo | null>(null);
     const [isLoadingInfo, setIsLoadingInfo] = useState(false);
     const [infoError, setInfoError] = useState<string | null>(null);
+    const [isDraggingInfo, setIsDraggingInfo] = useState(false);
 
     const {
         items,
@@ -246,11 +247,8 @@ function App() {
         setAudioProgress(null);
     }, []);
 
-    // Info tab handlers
-    const handleSelectMediaFile = useCallback(async () => {
-        const path = await selectMediaFile();
-        if (!path) return;
-
+    // Load media info from path (defined first for use by other handlers)
+    const loadMediaInfo = useCallback(async (path: string) => {
         setIsLoadingInfo(true);
         setInfoError(null);
         setMediaInfo(null);
@@ -265,10 +263,50 @@ function App() {
         }
     }, []);
 
+    // Info tab handlers
+    const handleSelectMediaFile = useCallback(async () => {
+        const path = await selectMediaFile();
+        if (!path) return;
+        await loadMediaInfo(path);
+    }, [loadMediaInfo]);
+
     const handleClearMediaInfo = useCallback(() => {
         setMediaInfo(null);
         setInfoError(null);
     }, []);
+
+    // Info tab drag & drop handlers
+    const handleInfoDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isLoadingInfo) {
+            setIsDraggingInfo(true);
+        }
+    }, [isLoadingInfo]);
+
+    const handleInfoDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDraggingInfo(false);
+    }, []);
+
+    const handleInfoDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDraggingInfo(false);
+
+        if (isLoadingInfo) return;
+
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            const file = files[0];
+            // Get file path from Tauri's file drop
+            const path = (file as any).path;
+            if (path) {
+                await loadMediaInfo(path);
+            }
+        }
+    }, [isLoadingInfo, loadMediaInfo]);
 
     const hasFiles = items.length > 0;
     const readyFiles = items.filter(i => i.status === 'ready' || i.status === 'pending');
@@ -1661,21 +1699,32 @@ function App() {
                         {/* Media Info Viewer - only in Info mode */}
                         {appMode === 'info' && (
                             <div className="space-y-6">
-                                {/* File Select Zone */}
+                                {/* File Select/Drop Zone */}
                                 <div
                                     onClick={handleSelectMediaFile}
+                                    onDragOver={handleInfoDragOver}
+                                    onDragLeave={handleInfoDragLeave}
+                                    onDrop={handleInfoDrop}
                                     className={`
                     p-8 border-2 border-dashed rounded-xl text-center cursor-pointer transition-all duration-200
                     ${isLoadingInfo
                                             ? 'border-dark-border bg-dark-surface opacity-50 cursor-wait'
-                                            : 'border-dark-border hover:border-indigo-500 bg-dark-surface hover:bg-dark-surface-light'
+                                            : isDraggingInfo
+                                                ? 'border-indigo-500 bg-indigo-500/10 scale-[1.02]'
+                                                : 'border-dark-border hover:border-indigo-500 bg-dark-surface hover:bg-dark-surface-light'
                                         }
                   `}
                                 >
                                     <div className="flex flex-col items-center gap-4">
-                                        <div className="w-16 h-16 rounded-full bg-indigo-500/10 flex items-center justify-center">
+                                        <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-colors ${isDraggingInfo ? 'bg-indigo-500/20' : 'bg-indigo-500/10'}`}>
                                             {isLoadingInfo ? (
                                                 <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                                            ) : isDraggingInfo ? (
+                                                <svg className="w-8 h-8 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                        d="M19 14l-7 7m0 0l-7-7m7 7V3"
+                                                    />
+                                                </svg>
                                             ) : (
                                                 <svg className="w-8 h-8 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -1686,7 +1735,7 @@ function App() {
                                         </div>
                                         <div>
                                             <p className="text-text-primary font-medium">
-                                                {isLoadingInfo ? '読み込み中...' : mediaInfo ? mediaInfo.filename : 'メディアファイルを選択'}
+                                                {isLoadingInfo ? '読み込み中...' : isDraggingInfo ? 'ここにドロップ' : mediaInfo ? mediaInfo.filename : 'クリックまたはドロップで選択'}
                                             </p>
                                             <p className="text-text-muted text-sm mt-1">
                                                 動画・音声ファイルの詳細情報を表示
