@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
+import { listen } from '@tauri-apps/api/event';
+import { open } from '@tauri-apps/plugin-dialog';
 import { VideoDropZone } from './components/VideoDropZone';
 import { FpsSettings } from './components/FpsSettings';
 import { BatchFileList } from './components/BatchFileList';
 import { BatchProgress } from './components/BatchProgress';
-import { checkFfmpeg, getAudioInfo, processAudio, selectAudioFiles, subscribeToProgress, getMediaDetailInfo, selectMediaFile, formatFileSize, formatDuration, formatBitrate } from './lib/tauri-commands';
+import { checkFfmpeg, getAudioInfo, processAudio, subscribeToProgress, getMediaDetailInfo, formatFileSize, formatDuration, formatBitrate } from './lib/tauri-commands';
 import { useBatchConvert } from './hooks/useBatchConvert';
 import { DEFAULT_FPS } from './lib/presets';
 import type { FFmpegStatus, QualityPreset, InterpolationMethod, OutputFormat, UpscaleModel, UpscaleScale, TargetResolution, DownscaleResolution, AudioOutputFormat, AudioQuality, AudioInfo, ProgressEvent, MediaDetailInfo } from './types/video';
@@ -53,6 +55,9 @@ function App() {
     const [mediaInfo, setMediaInfo] = useState<MediaDetailInfo | null>(null);
     const [isLoadingInfo, setIsLoadingInfo] = useState(false);
     const [infoError, setInfoError] = useState<string | null>(null);
+
+    // Drag state for audio and info tabs
+    const [isDraggingAudio, setIsDraggingAudio] = useState(false);
     const [isDraggingInfo, setIsDraggingInfo] = useState(false);
 
     const {
@@ -96,6 +101,110 @@ function App() {
         check();
     }, []);
 
+    // Audio extensions for filtering
+    const AUDIO_EXTENSIONS = ['mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma', 'aiff', 'opus'];
+    const MEDIA_EXTENSIONS = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'm4v', 'wmv', 'mpg', 'mpeg', 'mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a', 'wma', 'aiff', 'opus'];
+
+    const isAudioFile = (path: string): boolean => {
+        const ext = path.split('.').pop()?.toLowerCase() || '';
+        return AUDIO_EXTENSIONS.includes(ext);
+    };
+
+    const isMediaFile = (path: string): boolean => {
+        const ext = path.split('.').pop()?.toLowerCase() || '';
+        return MEDIA_EXTENSIONS.includes(ext);
+    };
+
+    // Tauri drag & drop listeners for audio and info tabs
+    useEffect(() => {
+        let unlistenDrop: (() => void) | undefined;
+        let unlistenHover: (() => void) | undefined;
+        let unlistenCancel: (() => void) | undefined;
+
+        const setupListeners = async () => {
+            // File drop event
+            unlistenDrop = await listen<{ paths: string[] }>('tauri://drag-drop', async (event) => {
+                const paths = event.payload.paths;
+                if (!paths || paths.length === 0) return;
+
+                if (appMode === 'audio' && !isAudioProcessing) {
+                    setIsDraggingAudio(false);
+                    const audioPaths = paths.filter(p => isAudioFile(p));
+                    if (audioPaths.length > 0) {
+                        // Add audio files
+                        const newItems: AudioItem[] = audioPaths.map(path => ({
+                            id: `audio-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                            inputPath: path,
+                            outputPath: '',
+                            audioInfo: null,
+                            status: 'loading' as const,
+                            progress: null,
+                            error: null,
+                        }));
+
+                        setAudioItems(prev => [...prev, ...newItems]);
+
+                        // Load audio info for each file
+                        for (const item of newItems) {
+                            try {
+                                const info = await getAudioInfo(item.inputPath);
+                                const ext = audioOutputFormat;
+                                const baseName = info.filename.replace(/\.[^/.]+$/, '');
+                                const dir = item.inputPath.substring(0, item.inputPath.lastIndexOf('/'));
+                                const outputPath = `${dir}/${baseName}_padded.${ext}`;
+
+                                setAudioItems(prev =>
+                                    prev.map(i =>
+                                        i.id === item.id
+                                            ? { ...i, audioInfo: info, outputPath, status: 'ready' }
+                                            : i
+                                    )
+                                );
+                            } catch (error) {
+                                setAudioItems(prev =>
+                                    prev.map(i =>
+                                        i.id === item.id
+                                            ? { ...i, status: 'error', error: String(error) }
+                                            : i
+                                    )
+                                );
+                            }
+                        }
+                    }
+                } else if (appMode === 'info' && !isLoadingInfo) {
+                    setIsDraggingInfo(false);
+                    const mediaPaths = paths.filter(p => isMediaFile(p));
+                    if (mediaPaths.length > 0) {
+                        await loadMediaInfo(mediaPaths[0]);
+                    }
+                }
+            });
+
+            // Drag hover event
+            unlistenHover = await listen('tauri://drag-enter', () => {
+                if (appMode === 'audio' && !isAudioProcessing) {
+                    setIsDraggingAudio(true);
+                } else if (appMode === 'info' && !isLoadingInfo) {
+                    setIsDraggingInfo(true);
+                }
+            });
+
+            // Drag cancel event
+            unlistenCancel = await listen('tauri://drag-leave', () => {
+                setIsDraggingAudio(false);
+                setIsDraggingInfo(false);
+            });
+        };
+
+        setupListeners();
+
+        return () => {
+            unlistenDrop?.();
+            unlistenHover?.();
+            unlistenCancel?.();
+        };
+    }, [appMode, isAudioProcessing, isLoadingInfo, audioOutputFormat]);
+
     // Handle file selection
     const handleFilesSelected = useCallback(async (paths: string[]) => {
         await addFiles(paths);
@@ -132,8 +241,23 @@ function App() {
 
     // Audio file handling
     const handleAddAudioFiles = useCallback(async () => {
-        const paths = await selectAudioFiles();
-        if (!paths || paths.length === 0) return;
+        const result = await open({
+            multiple: true,
+            filters: [
+                {
+                    name: '音声ファイル',
+                    extensions: AUDIO_EXTENSIONS,
+                },
+            ],
+        });
+
+        let paths: string[] = [];
+        if (result && Array.isArray(result)) {
+            paths = result;
+        } else if (result && typeof result === 'string') {
+            paths = [result];
+        }
+        if (paths.length === 0) return;
 
         const newItems: AudioItem[] = paths.map(path => ({
             id: `audio-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -265,9 +389,19 @@ function App() {
 
     // Info tab handlers
     const handleSelectMediaFile = useCallback(async () => {
-        const path = await selectMediaFile();
-        if (!path) return;
-        await loadMediaInfo(path);
+        const result = await open({
+            multiple: false,
+            filters: [
+                {
+                    name: 'メディアファイル',
+                    extensions: MEDIA_EXTENSIONS,
+                },
+            ],
+        });
+
+        if (result && typeof result === 'string') {
+            await loadMediaInfo(result);
+        }
     }, [loadMediaInfo]);
 
     const handleClearMediaInfo = useCallback(() => {
@@ -276,38 +410,6 @@ function App() {
     }, []);
 
     // Info tab drag & drop handlers
-    const handleInfoDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!isLoadingInfo) {
-            setIsDraggingInfo(true);
-        }
-    }, [isLoadingInfo]);
-
-    const handleInfoDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsDraggingInfo(false);
-    }, []);
-
-    const handleInfoDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsDraggingInfo(false);
-
-        if (isLoadingInfo) return;
-
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-            const file = files[0];
-            // Get file path from Tauri's file drop
-            const path = (file as any).path;
-            if (path) {
-                await loadMediaInfo(path);
-            }
-        }
-    }, [isLoadingInfo, loadMediaInfo]);
-
     const hasFiles = items.length > 0;
     const readyFiles = items.filter(i => i.status === 'ready' || i.status === 'pending');
     const hasCompletedAll = items.length > 0 && items.every(i => i.status === 'completed' || i.status === 'error' || i.status === 'cancelled');
@@ -1285,34 +1387,82 @@ function App() {
                         {/* Audio Editor - only in Audio mode */}
                         {appMode === 'audio' && (
                             <div className="space-y-6">
-                                {/* Audio Drop Zone */}
+                                {/* Audio Drop Zone - same style as VideoDropZone */}
                                 <div
                                     onClick={handleAddAudioFiles}
                                     className={`
-                    p-8 border-2 border-dashed rounded-xl text-center cursor-pointer transition-all duration-200
-                    ${isAudioProcessing
-                                            ? 'border-dark-border bg-dark-surface opacity-50 cursor-not-allowed'
-                                            : 'border-dark-border hover:border-green-500 bg-dark-surface hover:bg-dark-surface-light'
+                                        relative w-full min-h-[160px] rounded-xl border-2 border-dashed
+                                        flex flex-col items-center justify-center gap-3 p-6
+                                        transition-all duration-300 cursor-pointer
+                                        ${isDraggingAudio
+                                            ? 'border-green-400 bg-green-500/5'
+                                            : 'border-dark-border hover:border-green-400/50 hover:bg-dark-surface-light/50'
                                         }
-                  `}
+                                        ${isAudioProcessing ? 'opacity-50 cursor-not-allowed' : ''}
+                                        ${audioItems.length > 0 ? 'border-green-400/30 bg-dark-surface' : 'bg-dark-surface/50'}
+                                    `}
                                 >
-                                    <div className="flex flex-col items-center gap-4">
-                                        <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center">
-                                            <svg className="w-8 h-8 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                    {/* Background pattern */}
+                                    <div className="absolute inset-0 opacity-5 pointer-events-none overflow-hidden rounded-xl">
+                                        <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
+                                            <defs>
+                                                <pattern id="grid-audio" width="40" height="40" patternUnits="userSpaceOnUse">
+                                                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" strokeWidth="1" />
+                                                </pattern>
+                                            </defs>
+                                            <rect width="100%" height="100%" fill="url(#grid-audio)" />
+                                        </svg>
+                                    </div>
+
+                                    {/* Icon */}
+                                    <div className={`
+                                        w-16 h-16 rounded-full flex items-center justify-center
+                                        ${isDraggingAudio ? 'bg-green-400/20' : 'bg-dark-surface-light'}
+                                        transition-colors duration-300
+                                    `}>
+                                        <svg
+                                            className={`w-8 h-8 ${isDraggingAudio ? 'text-green-400' : 'text-text-secondary'}`}
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            {audioItems.length > 0 ? (
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                                                    d="M12 4v16m8-8H4"
+                                                />
+                                            ) : (
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                                                     d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
                                                 />
-                                            </svg>
-                                        </div>
-                                        <div>
-                                            <p className="text-text-primary font-medium">
-                                                {audioItems.length > 0 ? `${audioItems.length}ファイル選択済み` : '音声ファイルを選択'}
-                                            </p>
-                                            <p className="text-text-muted text-sm mt-1">
-                                                MP3, WAV, AAC, FLAC, OGG, M4A など
-                                            </p>
-                                        </div>
+                                            )}
+                                        </svg>
                                     </div>
+
+                                    {/* Text */}
+                                    <div className="text-center z-10">
+                                        <p className={`text-base font-medium ${isDraggingAudio ? 'text-green-400' : 'text-text-primary'}`}>
+                                            {audioItems.length > 0
+                                                ? '音声を追加'
+                                                : isDraggingAudio
+                                                    ? 'ドロップして音声を追加'
+                                                    : '音声をドラッグ&ドロップ'
+                                            }
+                                        </p>
+                                        <p className="text-sm text-text-secondary mt-1">
+                                            {audioItems.length > 0
+                                                ? `${audioItems.length}ファイル選択中 - クリックで追加`
+                                                : '複数ファイル選択可能'
+                                            }
+                                        </p>
+                                        <p className="text-xs text-text-muted mt-1">
+                                            対応形式: MP3, WAV, AAC, FLAC, OGG, M4A
+                                        </p>
+                                    </div>
+
+                                    {/* Glow effect when dragging */}
+                                    {isDraggingAudio && (
+                                        <div className="absolute inset-0 rounded-xl animate-pulse-glow pointer-events-none" style={{ boxShadow: '0 0 20px rgba(74, 222, 128, 0.3)' }} />
+                                    )}
                                 </div>
 
                                 {/* Audio File List */}
@@ -1699,49 +1849,88 @@ function App() {
                         {/* Media Info Viewer - only in Info mode */}
                         {appMode === 'info' && (
                             <div className="space-y-6">
-                                {/* File Select/Drop Zone */}
+                                {/* File Select/Drop Zone - same style as VideoDropZone */}
                                 <div
                                     onClick={handleSelectMediaFile}
-                                    onDragOver={handleInfoDragOver}
-                                    onDragLeave={handleInfoDragLeave}
-                                    onDrop={handleInfoDrop}
                                     className={`
-                    p-8 border-2 border-dashed rounded-xl text-center cursor-pointer transition-all duration-200
-                    ${isLoadingInfo
-                                            ? 'border-dark-border bg-dark-surface opacity-50 cursor-wait'
-                                            : isDraggingInfo
-                                                ? 'border-indigo-500 bg-indigo-500/10 scale-[1.02]'
-                                                : 'border-dark-border hover:border-indigo-500 bg-dark-surface hover:bg-dark-surface-light'
+                                        relative w-full min-h-[160px] rounded-xl border-2 border-dashed
+                                        flex flex-col items-center justify-center gap-3 p-6
+                                        transition-all duration-300 cursor-pointer
+                                        ${isDraggingInfo
+                                            ? 'border-indigo-400 bg-indigo-500/5'
+                                            : 'border-dark-border hover:border-indigo-400/50 hover:bg-dark-surface-light/50'
                                         }
-                  `}
+                                        ${isLoadingInfo ? 'opacity-50 cursor-wait' : ''}
+                                        ${mediaInfo ? 'border-indigo-400/30 bg-dark-surface' : 'bg-dark-surface/50'}
+                                    `}
                                 >
-                                    <div className="flex flex-col items-center gap-4">
-                                        <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-colors ${isDraggingInfo ? 'bg-indigo-500/20' : 'bg-indigo-500/10'}`}>
-                                            {isLoadingInfo ? (
-                                                <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-                                            ) : isDraggingInfo ? (
-                                                <svg className="w-8 h-8 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                                        d="M19 14l-7 7m0 0l-7-7m7 7V3"
+                                    {/* Background pattern */}
+                                    <div className="absolute inset-0 opacity-5 pointer-events-none overflow-hidden rounded-xl">
+                                        <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
+                                            <defs>
+                                                <pattern id="grid-info" width="40" height="40" patternUnits="userSpaceOnUse">
+                                                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" strokeWidth="1" />
+                                                </pattern>
+                                            </defs>
+                                            <rect width="100%" height="100%" fill="url(#grid-info)" />
+                                        </svg>
+                                    </div>
+
+                                    {/* Icon */}
+                                    <div className={`
+                                        w-16 h-16 rounded-full flex items-center justify-center
+                                        ${isDraggingInfo ? 'bg-indigo-400/20' : 'bg-dark-surface-light'}
+                                        transition-colors duration-300
+                                    `}>
+                                        {isLoadingInfo ? (
+                                            <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                                        ) : (
+                                            <svg
+                                                className={`w-8 h-8 ${isDraggingInfo ? 'text-indigo-400' : 'text-text-secondary'}`}
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                {mediaInfo ? (
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                                                     />
-                                                </svg>
-                                            ) : (
-                                                <svg className="w-8 h-8 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                ) : (
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                                                         d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                                                     />
-                                                </svg>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <p className="text-text-primary font-medium">
-                                                {isLoadingInfo ? '読み込み中...' : isDraggingInfo ? 'ここにドロップ' : mediaInfo ? mediaInfo.filename : 'クリックまたはドロップで選択'}
-                                            </p>
-                                            <p className="text-text-muted text-sm mt-1">
-                                                動画・音声ファイルの詳細情報を表示
-                                            </p>
-                                        </div>
+                                                )}
+                                            </svg>
+                                        )}
                                     </div>
+
+                                    {/* Text */}
+                                    <div className="text-center z-10">
+                                        <p className={`text-base font-medium ${isDraggingInfo ? 'text-indigo-400' : 'text-text-primary'}`}>
+                                            {isLoadingInfo
+                                                ? '読み込み中...'
+                                                : mediaInfo
+                                                    ? '別のファイルを選択'
+                                                    : isDraggingInfo
+                                                        ? 'ドロップして情報を表示'
+                                                        : 'メディアをドラッグ&ドロップ'
+                                            }
+                                        </p>
+                                        <p className="text-sm text-text-secondary mt-1">
+                                            {mediaInfo
+                                                ? mediaInfo.filename
+                                                : 'クリックまたはドラッグでファイルを選択'
+                                            }
+                                        </p>
+                                        <p className="text-xs text-text-muted mt-1">
+                                            対応形式: 動画・音声ファイル全般
+                                        </p>
+                                    </div>
+
+                                    {/* Glow effect when dragging */}
+                                    {isDraggingInfo && (
+                                        <div className="absolute inset-0 rounded-xl animate-pulse-glow pointer-events-none" style={{ boxShadow: '0 0 20px rgba(129, 140, 248, 0.3)' }} />
+                                    )}
                                 </div>
 
                                 {/* Error Display */}
